@@ -31,7 +31,7 @@ class RemoteFilesTab:
         actions.pack(fill=tk.X, pady=(8, 4))
         self.buttons = []
         for label, command in [('Refresh / Open', self.refresh), ('Up', self.up),
-                               ('Download…', self.download_selected)]:
+                               ('Download...', self.download_selected)]:
             button = ttk.Button(actions, text=label, command=command)
             button.pack(side=tk.LEFT, padx=(0, 6))
             self.buttons.append(button)
@@ -46,7 +46,8 @@ class RemoteFilesTab:
         listing.pack(fill=tk.BOTH, expand=True)
         listing.rowconfigure(0, weight=1)
         listing.columnconfigure(0, weight=1)
-        self.tree = ttk.Treeview(listing, columns=('kind', 'size'), selectmode='browse')
+        self.tree = ttk.Treeview(listing, columns=('kind', 'size'), selectmode='browse',
+                                 style='RemoteFiles.Treeview')
         self.tree.heading('#0', text='Name')
         self.tree.heading('kind', text='Type')
         self.tree.heading('size', text='Bytes')
@@ -61,6 +62,21 @@ class RemoteFilesTab:
         self.tree.configure(yscrollcommand=vertical.set, xscrollcommand=horizontal.set)
         self.tree.bind('<Double-1>', self.open_selected)
         self.tree.bind('<Return>', self.open_selected)
+        app.themes.add_listener(self._theme)
+        self._theme(app.themes.colors)
+
+    def _theme(self, colors):
+        style = self.app.themes.style
+        style.configure('RemoteFiles.Treeview', background=colors['field_bg'],
+                        fieldbackground=colors['field_bg'], foreground=colors['fg'],
+                        bordercolor=colors['border'])
+        style.map('RemoteFiles.Treeview',
+                  background=[('selected', colors['select_bg'])],
+                  foreground=[('selected', colors['select_fg'])])
+        style.configure('RemoteFiles.Treeview.Heading', background=colors['surface_alt'],
+                        foreground=colors['fg'], relief='flat')
+        style.map('RemoteFiles.Treeview.Heading',
+                  background=[('active', colors['button_hover'])])
 
     def _set_busy(self, value):
         self.busy = value
@@ -131,7 +147,7 @@ class RemoteFilesTab:
         generation = self.generation
         self._set_busy(True)
         self.progress.set(0)
-        self.status.set('Contacting satellite…')
+        self.status.set('Contacting satellite...')
         self.app._transfer_cancel = cancel = threading.Event()
         self.app._transfer_active.set()
         port = self.app.serial_connection
@@ -187,7 +203,7 @@ class RemoteFilesTab:
                 elapsed = info['elapsed']
                 rate = done / elapsed if elapsed > 0 else 0
                 self.progress.set(100 * done / total if total else 0)
-                self.status.set(f'{done:,} / {total:,} bytes • {rate:.0f} bytes/s')
+                self.status.set(f'{done:,} / {total:,} bytes | {rate:.0f} bytes/s')
             else:
                 self.status.set(info['status'])
             return
@@ -219,7 +235,7 @@ class RemoteFilesTab:
     def cancel(self):
         if self.busy and self.app._transfer_cancel is not None:
             self.app._transfer_cancel.set()
-            self.status.set('Cancelling…')
+            self.status.set('Cancelling...')
 
     def invalidate(self):
         self.generation += 1

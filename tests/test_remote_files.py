@@ -173,6 +173,9 @@ class TabTests(unittest.TestCase):
         for theme in ('light', 'high_contrast', 'dark'):
             self.app.themes.apply(theme)
             self.root.update()
+            colors = self.app.themes.colors
+            self.assertEqual(self.app.themes.style.lookup('RemoteFiles.Treeview', 'background'), colors['field_bg'])
+            self.assertEqual(self.app.themes.style.lookup('RemoteFiles.Treeview', 'foreground'), colors['fg'])
         self.assertFalse(self.app._transfer_active.is_set())
         # File protocol frames must never reach the ordinary telemetry parser.
         self.assertNotIn('@KFS1', self.app.received_text.get('1.0', 'end'))
