@@ -39,6 +39,14 @@ interactive rendering of live data.
 PyQtGraph and PyQt5 are only needed for the plot window. If they are missing the app still
 starts and the serial monitor works; plotting is disabled with a warning on the console.
 
+## Remote satellite files (Lab 8)
+
+The **Remote Files** tab browses the satellite SD card and downloads files over
+the existing XBee connection. It requires the matching `Astro331_Lab8_Code`
+firmware and supports verified downloads, progress, retries, and cancellation.
+See [setup, Windows executable download, and hardware test instructions](docs/remote-files.md).
+Live camera preview is a later milestone.
+
 ## Installation
 
 1. Install the required dependencies:

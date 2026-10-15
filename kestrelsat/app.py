@@ -64,6 +64,7 @@ from .plotting import PlotTab
 from . import scaling
 from . import __version__
 from . import zmodem
+from .remote_tab import RemoteFilesTab
 from .theming import ThemeManager
 from .widgets import ScrollableFrame, ToolTip
 
@@ -149,6 +150,7 @@ class SerialGUI:
 
         # ZMODEM file transfer
         self.zmodem_enabled = bool(self.settings.get('zmodem_enabled', True))
+        self._serial_read_lock = threading.Lock()
         self._transfer_active = threading.Event()
         self._transfer_cancel = None
         self._transfer_thread = None
@@ -278,6 +280,8 @@ class SerialGUI:
 
         # Setup Notepad tab content
         self.create_notepad_content()
+
+        self.remote_files = RemoteFilesTab(self)
 
         # Plot tabs, plus the '+' that adds another one. Built last so the
         # plot tabs and '+' sit to the right of the fixed tabs.
@@ -1061,6 +1065,9 @@ class SerialGUI:
     
     def connect(self):
         """Connect to serial port or start test mode"""
+        if self._transfer_thread is not None and self._transfer_thread.is_alive():
+            messagebox.showinfo("Transfer stopping", "Wait for the previous transfer to stop before reconnecting.")
+            return
         try:
             port = self.port_var.get()
             
@@ -1158,6 +1165,9 @@ class SerialGUI:
         self.stop_reading.set()
         if self._transfer_active.is_set() and self._transfer_cancel is not None:
             self._transfer_cancel.set()
+        if self._transfer_thread is not None and self._transfer_thread.is_alive():
+            self._transfer_thread.join(timeout=2.0)
+        self.remote_files.invalidate()
         self.serial_buffer = ""  # Clear buffer on disconnect
         self.first_line_received = False  # Reset first line flag
 
@@ -1206,11 +1216,16 @@ class SerialGUI:
                     time.sleep(0.05)
                     continue
 
-                pending = conn.in_waiting  # one syscall, not two
-                if pending > 0:
-                    data = conn.read(pending)
-                    if data:
-                        self._post_rx(('data', data))
+                with self._serial_read_lock:
+                    # Recheck after acquiring: a transfer may have taken
+                    # ownership while this reader was waiting for the lock.
+                    if self._transfer_active.is_set() or stop_event.is_set():
+                        continue
+                    pending = conn.in_waiting
+                    if pending > 0:
+                        data = conn.read(pending)
+                        if data:
+                            self._post_rx(('data', data))
                 time.sleep(0.01)  # Small delay to prevent excessive CPU usage
             except serial.SerialException:
                 self._post_rx(('error', None))
@@ -1263,6 +1278,8 @@ class SerialGUI:
                 self.display_received_data(payload)
             elif kind == 'log':
                 self.log_message(payload[0], payload[1])
+            elif kind == 'remote_files':
+                self.remote_files.on_event(payload)
             elif kind == 'zmodem':
                 self._on_transfer_event(payload)
             elif kind == 'error':
@@ -1368,10 +1385,11 @@ class SerialGUI:
 
     def _run_transfer(self, direction, paths, dest, prefix):
         """Worker thread. Must not touch a widget - post events instead."""
-        # The reader polls every 10ms with a 100ms port timeout, so give it a
-        # moment to notice _transfer_active and let go of the port.
-        time.sleep(0.2)
+        with self._serial_read_lock:
+            self._run_transfer_owned(direction, paths, dest, prefix)
 
+    def _run_transfer_owned(self, direction, paths, dest, prefix):
+        """The normal reader and Remote Files cannot consume this transfer."""
         port = self.serial_connection
         try:
             if port is None:
@@ -1581,6 +1599,9 @@ class SerialGUI:
             messagebox.showerror("Error", "Not connected to any port")
             return
         
+        if self._transfer_active.is_set():
+            messagebox.showinfo("Transfer in progress", "Wait for the file operation to finish, or cancel it.")
+            return
         try:
             data = self.send_entry.get()
             
