@@ -5,7 +5,14 @@ including JPEGs. Camera capture and live image preview are the next milestone.
 The original File → ZMODEM commands remain available for other compatible peers;
 use the **Remote Files** tab with the Lab 8 firmware.
 
-## First hardware test
+## Integration status — 2026-10-20
+
+The project owner confirmed that the Windows GCS and matching Lab 8 firmware
+work together on the KestrelSAT/XBee hardware for remote file access and transfer.
+The steps below remain the verification procedure for new builds or setups.
+Camera capture and live preview are still the next milestone.
+
+## Hardware test procedure
 
 1. In the firmware repository, open
    `Astro-331-2026-Fall/Astro331_Lab8_Code` as the PlatformIO project. Build and

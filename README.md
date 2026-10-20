@@ -25,6 +25,8 @@ interactive rendering of live data.
 - **High-DPI Aware**: Scales itself to stay readable on 4K and other high-resolution displays
 - **ZMODEM File Transfer**: Send and receive files over the same serial link, compatible with
   `sz`/`rz`, TeraTerm, minicom and other standard ZMODEM tools
+- **Remote SD Files**: Browse satellite folders and download files over XBee with
+  progress, cancellation, retries, and whole-file checksum verification
 - **Status Bar**: Connection status and samples-per-second
 - **Resize-safe**: a minimum window size plus scrollable panels, so no control
   can be pushed out of reach; Send Data and the monitor controls always stay visible
@@ -46,6 +48,23 @@ the existing XBee connection. It requires the matching `Astro331_Lab8_Code`
 firmware and supports verified downloads, progress, retries, and cancellation.
 See [setup, Windows executable download, and hardware test instructions](docs/remote-files.md).
 Live camera preview is a later milestone.
+
+Use the [matching Lab 8 firmware](https://github.com/chasedustevichusafa/Lab-8-Wireless-Image-Capture-and-Transmission/tree/feature/remote-files/Astro-331-2026-Fall/Astro331_Lab8_Code).
+Connect to the ground XBee COM port at **9600 baud, 8N1**, then open
+**Remote Files → Refresh / Open**. Double-click folders or select a file and
+choose **Download...**. Downloads are read-only and restart after interruption.
+
+### Dated changes
+
+- **2026-10-20 — Hardware integration confirmed:** The project owner confirmed
+  that the Windows GCS and Lab 8 firmware work together on the KestrelSAT/XBee
+  hardware for the remote file-transfer milestone.
+- **2026-10-15 — Remote Files implemented:** Added the browser/download tab,
+  KFS1 protocol client, exclusive serial-port coordination, progress and cancel
+  controls, chunk retries, and final CRC32 verification. Added automated protocol
+  and GUI tests plus the **Windows test build** GitHub Actions workflow, which
+  packages an executable without publishing a release. File-list colors follow
+  the selected theme. Camera capture and live preview remain future work.
 
 ## Installation
 
