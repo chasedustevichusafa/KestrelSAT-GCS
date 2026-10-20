@@ -3,7 +3,7 @@ name: Windows test build
 on:
   workflow_dispatch:
   push:
-    branches: ['main', 'feature/remote-files']
+    branches: ['main', 'feature/remote-files', 'feature/transfer-statistics']
   pull_request:
     paths:
       - 'kestrelsat/**'
@@ -35,6 +35,10 @@ jobs:
           python tests/test_themes.py
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python tests/test_remote_files.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python tests/test_transfer_stats.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python tests/test_xbee_api.py
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Build Windows executable
         run: python -m PyInstaller --noconfirm KestrelSAT_GCS_v1.spec

@@ -31,6 +31,17 @@ interactive rendering of live data.
 - **Resize-safe**: a minimum window size plus scrollable panels, so no control
   can be pushed out of reach; Send Data and the monitor controls always stay visible
 
+## Transfer statistics and RSSI (2026-10-20)
+
+The **Transfer Stats** tab records live download/upload rates for file transfers,
+retains sessions, and exports PNG graphs and CSV measurements. Optional ground
+receiver RSSI is sampled through an **XBee API (AP=1)** connection; transparent
+mode continues to support file transfers and rate graphs.
+
+See [transfer graphs, measurement definitions, and XCTU API-mode setup](docs/transfer-statistics.md)
+before changing the ground XBee. Satellite firmware is unchanged. These changes
+are on `feature/transfer-statistics` for hardware testing.
+
 ## Requirements
 
 - Python 3.10 or newer (required by the pinned `pyqtgraph`)

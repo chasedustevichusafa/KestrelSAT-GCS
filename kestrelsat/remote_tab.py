@@ -151,18 +151,23 @@ class RemoteFilesTab:
         self.app._transfer_cancel = cancel = threading.Event()
         self.app._transfer_active.set()
         port = self.app.serial_connection
+        if hasattr(port, 'set_transfer_cancel'):
+            port.set_transfer_cancel(cancel)
+        stats = self.app.start_transfer_statistics('KFS1', 'download', path) if action == 'download' else None
         worker = threading.Thread(target=self._worker,
-                                  args=(generation, port, cancel, action, path, destination), daemon=True)
+                                  args=(generation, port, cancel, action, path, destination, stats), daemon=True)
         self.app._transfer_thread = worker
         worker.start()
 
-    def _worker(self, generation, port, cancel, action, path, destination):
+    def _worker(self, generation, port, cancel, action, path, destination, stats):
         def post(event, **info):
             self.app._post_rx(('remote_files', dict(info, event=event, generation=generation)))
         last_progress = 0
 
         def progress(**info):
             nonlocal last_progress
+            if stats is not None:
+                stats.progress(**info)
             now = time.monotonic()
             if now-last_progress >= 0.1:
                 post('progress', **info)
@@ -175,7 +180,8 @@ class RemoteFilesTab:
                     raise remote_files.Cancelled('Operation cancelled')
                 old_timeout, old_write_timeout = port.timeout, port.write_timeout
                 try:
-                    port.timeout, port.write_timeout = 0.1, 1.0
+                    port.timeout = 0.1
+                    port.write_timeout = 5.0 if getattr(port, 'api_mode', False) else 1.0
                     client = remote_files.Client(port, cancel=cancel, progress=progress)
                     if action == 'list':
                         entries = client.list_directory(path)
@@ -188,8 +194,13 @@ class RemoteFilesTab:
         except remote_files.Cancelled:
             result = dict(event='cancelled', detail='Cancelled. Any incomplete local download was removed.')
         except Exception as exc:
-            result = dict(event='failed', detail=str(exc))
+            result = dict(event='cancelled' if cancel.is_set() else 'failed', detail=str(exc))
         finally:
+            if hasattr(port, 'set_transfer_cancel'):
+                port.set_transfer_cancel(None)
+            if stats is not None:
+                stats.finish('completed' if result['event'] == 'downloaded' else
+                             'cancelled' if result['event'] == 'cancelled' else 'failed')
             self.app._transfer_active.clear()
             post(**result)
 

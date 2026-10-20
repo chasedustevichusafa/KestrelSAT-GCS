@@ -13,6 +13,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 SUITES = [
     "test_themes.py",
     "test_remote_files.py",
+    "test_transfer_stats.py",
+    "test_xbee_api.py",
     "test_correctness.py",
     "test_scaling.py",
     "test_multiplot.py",

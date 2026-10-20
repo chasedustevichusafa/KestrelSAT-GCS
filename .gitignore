@@ -38,3 +38,6 @@ notes/
 
 # ZMODEM downloads
 downloads/
+
+# Transfer statistics CSV recordings
+transfer_statistics/

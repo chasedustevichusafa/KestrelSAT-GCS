@@ -5,6 +5,8 @@ display. On Linux use `xvfb`; on Windows they run directly.
 
 | file | what it covers | needs a display |
 |---|---|---|
+| `test_transfer_stats.py` | Interval rates, stalls, unique-byte accounting, CSV recording, RSSI gaps, and PNG exports. | yes |
+| `test_xbee_api.py` | AP=1 framing, AT/status/data multiplexing, RSSI polling, timeouts, and KFS downloads through a simulated radio. | no |
 | `test_remote_files.py` | KFS1 framing, paths, timeouts, browsing, downloads, cancellation, disconnect cleanup, and serial ownership through the real tab. Uses a simulated wire peer. | yes |
 | `test_themes.py` | Theme table: token parity across the three themes, colour format, WCAG contrast ratios. Parses `serial_gui.py` with `ast`, so it imports nothing. | no |
 | `test_scaling.py` | High-DPI scaling: detection, font/geometry scaling, the Preferences round-trip, and that repeated application does not compound. | yes |

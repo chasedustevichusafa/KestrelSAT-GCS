@@ -486,6 +486,7 @@ class ZModemSender:
     def _send_body(self, path, size, position):
         name = os.path.basename(path)
         errors = 0
+        self.progress(name=name, sent=position, total=size, status="starting")
         with open(path, "rb") as handle:
             while True:
                 if self._cancelled():
