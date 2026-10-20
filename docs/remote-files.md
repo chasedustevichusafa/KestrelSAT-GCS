@@ -48,8 +48,9 @@ for an arbitrary file is not achievable on this link.
 ## Windows executable without a release
 
 The **Windows test build** workflow creates a downloadable executable artifact;
-it does not create tags or publish a release. A push to `feature/remote-files`
-automatically builds. You can also run it from GitHub:
+it does not create tags or publish a release. Pushes and merges into `main`
+automatically build a fresh executable. Pushes to `feature/remote-files` also
+build, and manual runs remain available. You can run it from GitHub:
 
 1. Open the GCS repository → **Actions** → **Windows test build**.
 2. Click **Run workflow**, select the branch containing the changes, then run it.
