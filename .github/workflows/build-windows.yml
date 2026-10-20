@@ -1,0 +1,57 @@
+name: Windows test build
+
+on:
+  workflow_dispatch:
+  push:
+    branches: ['feature/remote-files']
+  pull_request:
+    paths:
+      - 'kestrelsat/**'
+      - 'tests/**'
+      - 'serial_gui.py'
+      - 'requirements.txt'
+      - 'KestrelSAT_GCS_v1.spec'
+      - '.github/workflows/build-windows.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+      - name: Install dependencies
+        run: |
+          python -m pip install -r requirements.txt
+          python -m pip install pyinstaller pillow
+      - name: Run portable tests
+        run: |
+          python tests/test_themes.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python tests/test_remote_files.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Build Windows executable
+        run: python -m PyInstaller --noconfirm KestrelSAT_GCS_v1.spec
+      - name: Verify executable
+        shell: pwsh
+        run: |
+          $exe = 'dist/KestrelSAT_GCS.exe'
+          if (-not (Test-Path $exe)) { throw 'No executable produced' }
+          if ((Get-Item $exe).Length -lt 5MB) { throw 'Executable is unexpectedly small' }
+          $bytes = [System.IO.File]::ReadAllBytes($exe)
+          if ($bytes[0] -ne 0x4D -or $bytes[1] -ne 0x5A) { throw 'Missing Windows MZ header' }
+          Get-FileHash $exe -Algorithm SHA256 | Format-List | Out-File dist/SHA256.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: KestrelSAT-GCS-Windows-${{ github.sha }}
+          path: |
+            dist/KestrelSAT_GCS.exe
+            dist/SHA256.txt
+          if-no-files-found: error
+          retention-days: 14

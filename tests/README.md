@@ -5,6 +5,7 @@ display. On Linux use `xvfb`; on Windows they run directly.
 
 | file | what it covers | needs a display |
 |---|---|---|
+| `test_remote_files.py` | KFS1 framing, paths, timeouts, browsing, downloads, cancellation, disconnect cleanup, and serial ownership through the real tab. Uses a simulated wire peer. | yes |
 | `test_themes.py` | Theme table: token parity across the three themes, colour format, WCAG contrast ratios. Parses `serial_gui.py` with `ast`, so it imports nothing. | no |
 | `test_scaling.py` | High-DPI scaling: detection, font/geometry scaling, the Preferences round-trip, and that repeated application does not compound. | yes |
 | `test_multiplot.py` | Multiple plot tabs: the default layout and `+` tab, adding and removing plots, renumbering (tabs and window titles), that every plot sees every line, and that configuration, data, clearing and sample numbering stay independent. | yes |
