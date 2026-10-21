@@ -9,6 +9,7 @@ import unittest
 
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 from kestrelsat.transfer_stats import Recorder
+from kestrelsat import themes
 
 
 class Clock:
@@ -439,8 +440,10 @@ class GraphTests(unittest.TestCase):
                 tab.combine_transfers()
                 dialog = next(child for child in root.winfo_children() if isinstance(child, tk.Toplevel))
                 choices = next(child for child in dialog.winfo_children() if isinstance(child, tk.Listbox))
+                self.assertEqual(choices.cget('background'), themes.CURRENT['field_bg'])
                 choices.selection_set(0, tk.END)
-                button = next(child for child in dialog.winfo_children() if child.winfo_class() == 'TButton')
+                button = next(child for frame in dialog.winfo_children() for child in frame.winfo_children()
+                              if child.winfo_class() == 'TButton' and child['text'] == 'Combine selected')
                 button.invoke()
                 deadline = time.monotonic()+5
                 while str(tab.combine_button['state']) == 'disabled' and time.monotonic() < deadline:

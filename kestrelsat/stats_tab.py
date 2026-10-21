@@ -106,6 +106,8 @@ class StatisticsTab:
         dialog = tk.Toplevel(self.app.root)
         dialog.title('Combine finished transfers')
         dialog.transient(self.app.root)
+        footer = ttk.Frame(dialog)
+        footer.pack(side=tk.BOTTOM, fill=tk.X, padx=12, pady=10)
         ttk.Label(dialog, text='Select transfers from this application run. Original timing and gaps are preserved.',
                   wraplength=520).pack(padx=12, pady=8)
         name = tk.StringVar(value='Combined transfer test')
@@ -132,7 +134,10 @@ class StatisticsTab:
                 self.app._post_rx(('stats_combined', payload))
             self._combine_worker = threading.Thread(target=worker, daemon=True)
             self._combine_worker.start()
-        ttk.Button(dialog, text='Combine selected', command=combine).pack(pady=(0, 10))
+        ttk.Button(footer, text='Combine selected', command=combine).pack(side=tk.LEFT)
+        ttk.Button(footer, text='Cancel', command=dialog.destroy).pack(side=tk.LEFT, padx=6)
+        self.app.themes.restyle(dialog)
+        self.app._prepare_dialog(dialog)
         dialog.grab_set()
 
     def on_combined(self, payload):
