@@ -237,6 +237,20 @@ class ApiTests(unittest.TestCase):
         self.wait(lambda: port.traffic_snapshot()['rssi'] == -55)
         self.assertEqual(len(raw.readers), 1)
 
+    def test_delete_rename_long_paths_over_legacy_api(self):
+        peer = SatellitePort()
+        parent = '/'+'p'*175
+        source, target = parent+'/original.txt', parent+'/renamed.txt'
+        peer.files[source] = b'contents'
+        raw, port = self.connect(peer)
+        raw.receive_format = 'legacy16'
+        client = Client(port, timeout=1)
+        client.rename_file(source, target)
+        self.assertEqual(peer.files[target], b'contents')
+        client.delete_file(target)
+        self.assertNotIn(target, peer.files)
+        self.assertEqual(len(raw.readers), 1)
+
     def test_no_reply_includes_api_diagnostics(self):
         raw, port = self.connect()
         # A successful RF delivery does not establish a firmware response.

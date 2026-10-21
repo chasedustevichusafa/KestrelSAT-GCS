@@ -13,7 +13,7 @@ import threading
 import time
 import zlib
 
-MAX_LINE = 768
+MAX_LINE = 1024
 MAX_PATH = 192
 CHUNK = 128
 MAX_ENTRIES = 4096
@@ -23,7 +23,11 @@ class RemoteError(Exception):
     pass
 
 
-class UploadUncertain(RemoteError):
+class OperationUncertain(RemoteError):
+    pass
+
+
+class UploadUncertain(OperationUncertain):
     pass
 
 
@@ -74,12 +78,12 @@ def partial_path(path):
     return bool(re.fullmatch(r'\.kfs-[0-9a-f]{8}\.part', path.rsplit('/', 1)[-1]))
 
 
-def upload_path_hex(path):
+def upload_path_hex(path, temporary=True):
     encoded = path_hex(path)
     name = path.rsplit('/', 1)[-1]
     if (not name or name.casefold().startswith('.kfs-') or any(c in path for c in '<>:"|?*') or
             any(part.endswith(('.', ' ')) for part in path[1:].split('/')) or
-            len(path[:len(path)-len(name)].encode('utf-8'))+18 > MAX_PATH):
+            temporary and len(path[:len(path)-len(name)].encode('utf-8'))+18 > MAX_PATH):
         raise RemoteError('Choose an SD filename without reserved characters or a .kfs- prefix')
     return encoded
 
@@ -230,15 +234,47 @@ class Client:
             self.progress(status=f'Reading directory: {len(entries)} entries')
         raise RemoteError('Directory is too large')
 
-    def supports_upload(self):
+    def capabilities(self):
         self.hello()
         try:
             reply = self.request('CAPS', expected={'CAPS'})
         except RemoteError as exc:
             if 'Satellite: BAD_COMMAND' in str(exc):
-                return False
+                return set()
             raise
-        return len(reply) >= 3 and 'UPLOAD1' in reply[1:-1] and reply[-1] == str(CHUNK)
+        return set(reply[1:-1]) if len(reply) >= 3 and reply[-1] == str(CHUNK) else set()
+
+    def supports_upload(self):
+        return 'UPLOAD1' in self.capabilities()
+
+    def _manage(self, op, *args):
+        if 'MANAGE1' not in self.capabilities():
+            raise RemoteError('Satellite firmware needs the delete/rename update')
+        request_id = f'{(self._id+1) & 0xffffffff:08x}'
+        expected = 'DELETED' if op == 'DELETE' else 'RENAMED'
+        try:
+            if self.request(op, *args, expected={expected}) != [expected]:
+                raise RemoteError('Unexpected file operation reply')
+        except Exception as exc:
+            if isinstance(exc, RemoteError) and str(exc).startswith('Satellite:'):
+                raise
+            result = self._upload_cleanup('RESULT', request_id)
+            if result == ['RESULT', op, expected]:
+                return
+            if result and result[:3] == ['RESULT', op, 'ERR']:
+                raise RemoteError('Satellite: '+' '.join(result[3:])) from exc
+            raise OperationUncertain(f'{op.title()} completion could not be confirmed. '
+                'Refresh the folder before trying again. '+str(exc)) from exc
+
+    def delete_file(self, path):
+        self._manage('DELETE', upload_path_hex(path, temporary=False))
+
+    def rename_file(self, path, target):
+        encoded = upload_path_hex(path, temporary=False)
+        renamed = upload_path_hex(target, temporary=False)
+        if path.rsplit('/', 1)[0] != target.rsplit('/', 1)[0]:
+            raise RemoteError('Rename keeps the file in the same folder')
+        self._manage('RENAME', encoded, renamed)
 
     def require_upload(self):
         if not self.supports_upload():

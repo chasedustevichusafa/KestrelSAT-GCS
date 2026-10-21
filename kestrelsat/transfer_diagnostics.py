@@ -9,7 +9,7 @@ import time
 
 class Capture:
     def __init__(self, context, directory='transfer_diagnostics', max_bytes=2*1024*1024):
-        self.context = dict(context, client='KFS1 upload-1')
+        self.context = dict(context, client='KFS1 manage-1')
         self.max_bytes = max_bytes
         self.path = None
         self.stream = None

@@ -2,7 +2,8 @@
 
 Use matching GCS and Lab 8 builds from `feature/remote-upload`. This extends the
 working stability build. The project owner confirmed the preceding stability
-build worked on hardware; upload hardware validation is pending.
+build worked on hardware and subsequently confirmed the upload build works.
+The current [file-management build](remote-file-management.md) includes these uploads.
 
 ## Upload a file
 
@@ -51,8 +52,8 @@ Cancel, idle expiry and known failures attempt to remove the temporary file.
 After a reset, power interruption or failed cleanup, **Refresh** and select the
 `.kfs-xxxxxxxx.part` entry, then **Remove partial...**. The dialog confirms the
 exact path. The firmware restricts cleanup to reserved temporary names, rejects
-directories and refuses cleanup during an active session. Download controls do
-not permit arbitrary deletion. Filesystem rename is not a power-loss transaction;
+directories and refuses cleanup during an active session. The upload-only build restricts deletion to partials; the newer file-management
+build adds a separate confirmed Delete control for ordinary files. Filesystem rename is not a power-loss transaction;
 after a reset, inspect the folder/card rather than assuming completion.
 
 A lost COMMIT acknowledgment is retried idempotently. If needed, the GCS asks for

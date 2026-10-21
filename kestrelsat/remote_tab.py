@@ -19,6 +19,7 @@ class RemoteFilesTab:
         self.entries = {}
         self.busy = False
         self.upload_supported = False
+        self.manage_supported = False
         self.generation = 0
         self.path = tk.StringVar(value='/')
         self.status = tk.StringVar(value='Connect on the Connection tab, then Refresh to browse the satellite SD card.')
@@ -32,16 +33,23 @@ class RemoteFilesTab:
         self.path_entry.bind('<Return>', lambda event: self.refresh())
         actions = ttk.Frame(self.frame)
         actions.pack(fill=tk.X, pady=(8, 4))
+        file_actions = ttk.Frame(self.frame)
+        file_actions.pack(fill=tk.X, pady=(0, 4))
         self.buttons = []
         self.upload_buttons = []
-        for label, command in [('Refresh / Open', self.refresh), ('Up', self.up),
-                               ('Download...', self.download_selected), ('Upload...', self.upload_selected),
-                               ('Remove partial...', self.remove_partial)]:
-            button = ttk.Button(actions, text=label, command=command)
+        self.manage_buttons = []
+        for label, command, row in [('Refresh / Open', self.refresh, actions), ('Up', self.up, actions),
+                                   ('Download...', self.download_selected, actions), ('Upload...', self.upload_selected, actions),
+                                   ('Rename...', self.rename_selected, file_actions), ('Delete...', self.delete_selected, file_actions),
+                                   ('Remove partial...', self.remove_partial, file_actions)]:
+            button = ttk.Button(row, text=label, command=command)
             button.pack(side=tk.LEFT, padx=(0, 6))
             self.buttons.append(button)
             if label in ('Upload...', 'Remove partial...'):
                 self.upload_buttons.append(button)
+                button.configure(state=tk.DISABLED)
+            if label in ('Rename...', 'Delete...'):
+                self.manage_buttons.append(button)
                 button.configure(state=tk.DISABLED)
         self.cancel_button = ttk.Button(actions, text='Cancel', command=self.cancel, state=tk.DISABLED)
         self.cancel_button.pack(side=tk.LEFT)
@@ -92,6 +100,9 @@ class RemoteFilesTab:
             button.configure(state=tk.DISABLED if value else tk.NORMAL)
         if not value and not self.upload_supported:
             for button in self.upload_buttons:
+                button.configure(state=tk.DISABLED)
+        if not value and not self.manage_supported:
+            for button in self.manage_buttons:
                 button.configure(state=tk.DISABLED)
         self.path_entry.configure(state=tk.DISABLED if value else tk.NORMAL)
         self.cancel_button.configure(state=tk.NORMAL if value else tk.DISABLED)
@@ -178,6 +189,57 @@ class RemoteFilesTab:
             return
         self._start('upload', target, source)
 
+    def _selected_file(self):
+        selection = self.tree.selection()
+        entry = self.entries.get(selection[0]) if selection else None
+        if entry is None or entry.directory:
+            self.status.set('Select a file; Delete and Rename do not change folders.')
+            return None
+        if entry.name.casefold().startswith('.kfs-'):
+            self.status.set('Use Remove partial for unfinished upload files.')
+            return None
+        return posixpath.join(self.directory, entry.name)
+
+    def delete_selected(self):
+        if not self._ready():
+            return
+        path = self._selected_file()
+        generation, port = self.generation, self.app.serial_connection
+        if path and messagebox.askyesno('Delete satellite file',
+                'Permanently delete '+path+' from the satellite SD card?',
+                default=messagebox.NO, parent=self.app.root) and self._ready():
+            if generation != self.generation or port is not self.app.serial_connection:
+                self.status.set('Connection or folder changed; select the file again.'); return
+            self._start('delete', path)
+
+    def rename_selected(self):
+        if not self._ready():
+            return
+        path = self._selected_file()
+        if path is None:
+            return
+        folder, old_name = posixpath.split(path)
+        generation, port = self.generation, self.app.serial_connection
+        name = simpledialog.askstring('Rename satellite file',
+            'New filename for '+path+':', initialvalue=old_name, parent=self.app.root)
+        if not name or not self._ready():
+            return
+        if generation != self.generation or port is not self.app.serial_connection:
+            self.status.set('Connection or folder changed; select the file again.'); return
+        if name == old_name:
+            self.status.set('Name unchanged.'); return
+        if '/' in name or '\\' in name:
+            self.status.set('Enter a filename; Rename keeps the current folder.'); return
+        target = posixpath.join(folder, name)
+        try:
+            remote_files.upload_path_hex(target, temporary=False)
+        except remote_files.RemoteError as exc:
+            self.status.set(str(exc)); return
+        if any(entry.name.casefold() == name.casefold() for entry in self.entries.values()):
+            self.status.set('That name already exists; choose a different name. Case-only renames are not supported.')
+            return
+        self._start('rename', path, target)
+
     def remove_partial(self):
         if not self._ready():
             return
@@ -196,6 +258,8 @@ class RemoteFilesTab:
         self._set_busy(True)
         self.progress.set(0)
         self.status.set('Contacting satellite...')
+        if action in ('delete', 'rename'):
+            self.cancel_button.configure(state=tk.DISABLED)
         self.app._transfer_cancel = cancel = threading.Event()
         self.app._transfer_active.set()
         port = self.app.serial_connection
@@ -239,9 +303,12 @@ class RemoteFilesTab:
                         entries = client.list_directory(path)
                         result = dict(event='listed', entries=entries, path=path)
                         try:
-                            result['upload_supported'] = client.supports_upload()
+                            capabilities = client.capabilities()
+                            result['upload_supported'] = 'UPLOAD1' in capabilities
+                            result['manage_supported'] = 'MANAGE1' in capabilities
                         except Exception as exc:
                             result['upload_supported'] = False
+                            result['manage_supported'] = False
                             result['capability_error'] = str(exc)
                     elif action == 'download':
                         saved = client.download(path, destination)
@@ -252,9 +319,15 @@ class RemoteFilesTab:
                             if stats is not None:
                                 stats.finish('completed')
                             result = dict(event='uploaded', destination=path)
-                        else:
+                        elif action == 'clean':
                             client.clean_partial(path)
                             result = dict(event='cleaned', destination=path)
+                        elif action == 'delete':
+                            client.delete_file(path)
+                            result = dict(event='deleted', destination=path)
+                        else:
+                            client.rename_file(path, destination)
+                            result = dict(event='renamed', destination=destination, source=path)
                         try:
                             folder = posixpath.dirname(path) or '/'
                             result.update(entries=client.list_directory(folder), path=folder)
@@ -262,7 +335,7 @@ class RemoteFilesTab:
                             result['refresh_error'] = str(exc)
                 finally:
                     port.timeout, port.write_timeout = old_timeout, old_write_timeout
-        except remote_files.UploadUncertain as exc:
+        except remote_files.OperationUncertain as exc:
             result = dict(event='uncertain', detail=str(exc))
         except remote_files.Cancelled:
             result = dict(event='cancelled', detail='Cancelled. Upload temporary files are cleaned when reachable; Refresh to check for .part files.')
@@ -301,6 +374,8 @@ class RemoteFilesTab:
             else:
                 self.status.set(info['status'])
             return
+        if 'manage_supported' in info:
+            self.manage_supported = info['manage_supported']
         if 'upload_supported' in info:
             self.upload_supported = info['upload_supported']
         self._set_busy(False)
@@ -312,7 +387,7 @@ class RemoteFilesTab:
         if not self.app.is_connected:
             self.invalidate()
             return
-        if event == 'listed' or event in ('uploaded', 'cleaned') and 'entries' in info:
+        if event == 'listed' or event in ('uploaded', 'cleaned', 'deleted', 'renamed') and 'entries' in info:
             self.tree.delete(*self.tree.get_children())
             self.entries.clear()
             self.directory = info['path']
@@ -326,10 +401,14 @@ class RemoteFilesTab:
             if event == 'listed' and not self.upload_supported:
                 notice += (' Upload availability could not be checked; Refresh to retry.' if info.get('capability_error')
                            else ' Uploads require the updated satellite firmware.')
+            if event == 'listed' and self.upload_supported and not self.manage_supported:
+                notice += ' Delete/Rename require the updated satellite firmware.'
             self.status.set(notice)
-        if event in ('uploaded', 'cleaned'):
+        if event in ('uploaded', 'cleaned', 'deleted', 'renamed'):
             self.progress.set(100)
-            notice = ('Upload verified and saved: ' if event == 'uploaded' else 'Partial upload removed: ') + info['destination']
+            prefixes = dict(uploaded='Upload verified and saved: ', cleaned='Partial upload removed: ',
+                            deleted='File deleted: ', renamed='File renamed to: ')
+            notice = prefixes[event] + info['destination']
             if info.get('refresh_error'):
                 notice += ' | Folder refresh failed; use Refresh. ' + info['refresh_error']
             self.status.set(notice)
@@ -350,6 +429,7 @@ class RemoteFilesTab:
 
     def invalidate(self):
         self.upload_supported = False
+        self.manage_supported = False
         self.generation += 1
         self.tree.delete(*self.tree.get_children())
         self.entries.clear()
