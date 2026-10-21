@@ -90,8 +90,29 @@ Download feature builds from [Windows test build Actions](https://github.com/cha
 Choose a successful run on `feature/transfer-statistics`, download its Windows
 artifact while signed into GitHub, and extract it before launching the executable.
 
+### File-transfer stability investigation (2026-10-21)
+
+The `fix/file-transfer-stability` branch adds per-operation diagnostic captures
+in `transfer_diagnostics/`, including failed offsets, request timing, retry and
+invalid-frame counts, final outcome, and radio counters. The monitor prints the
+capture path after each operation. File payloads are excluded; successful read
+checkpoints are sampled once per second, and each capture rotates at 2 MiB with
+one backup. Failure to record diagnostics does not abort a transfer.
+
+The matching [stability firmware](https://github.com/chasedustevichusafa/Lab-8-Wireless-Image-Capture-and-Transmission/tree/fix/file-transfer-stability/Astro-331-2026-Fall/Astro331_Lab8_Code)
+retries transient SD reads from the same offset up to three times and provides
+USB-only SD diagnostics. A permanent read failure still stops safely and reports
+its offset. Fault injection reproduced the old fatal-read behavior; recovery is
+tested in simulation. The physical source of the reported failures and the
+hardware reliability target remain to be established.
+
+Follow the [diagnostic procedure and hardware acceptance checklist](docs/file-transfer-stability.md).
+
 ### Dated changes
 
+- **2026-10-21 — Transfer stability diagnostics:** Added bounded metadata captures,
+  contextual errors, and simulated loss/corruption stress tests. Matching firmware
+  adds bounded SD read recovery and local USB SD scans; hardware validation is pending.
 - **2026-10-21 — XBee API receive compatibility:** Added legacy `0x80`/`0x81`
   receive support for the supplied lab radio profile's default `AO=2` output.
   API-mode file timeouts now include radio delivery and received-frame diagnostics.

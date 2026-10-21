@@ -1,6 +1,7 @@
 """Portable KFS1 client and real Tk tab regression tests (no radio required)."""
 from pathlib import Path
 import os
+import json
 import sys
 import tempfile
 import threading
@@ -11,6 +12,7 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from kestrelsat import remote_files as rf
+from kestrelsat.transfer_diagnostics import Capture
 
 
 class SatellitePort:
@@ -119,6 +121,88 @@ class ClientTests(unittest.TestCase):
         port = SatellitePort()
         port.rx.extend(b'x'*(rf.MAX_LINE+30) + b'\n' + rf.encode(1, 'ERR', 'STALE'))
         rf.Client(port).hello()
+
+    def test_sd_failure_reports_offset_and_writes_metadata_capture(self):
+        port = SatellitePort()
+        original_write = port.write
+        def write(data):
+            request_id, fields = rf.decode(data.strip())
+            if fields[0] == 'READ' and int(fields[2]) >= 128:
+                port.rx.extend(rf.encode(request_id, 'ERR', 'READ_FAILED', 128, 128, -1, 3))
+                return len(data)
+            return original_write(data)
+        port.write = write
+        with tempfile.TemporaryDirectory() as tmp:
+            capture = Capture(dict(path='/data.bin', baud=115200, mode='API'), directory=tmp)
+            destination = Path(tmp)/'original.bin'
+            destination.write_bytes(b'original')
+            client = rf.Client(port, diagnostic=capture.record)
+            with self.assertRaisesRegex(rf.RemoteError, 'READ_FAILED offset=128.*got=-1.*attempts=3.*operation=READ offset=128') as error:
+                client.download('/data.bin', destination)
+            capture.close('failed', detail=str(error.exception))
+            rows = [json.loads(line) for line in capture.path.read_text().splitlines()]
+            failure = next(row for row in rows if row['event'] == 'request_failed')
+            self.assertEqual((failure['operation'], failure['offset']), ('READ', 128))
+            self.assertEqual(rows[-1]['status'], 'failed')
+            self.assertEqual(destination.read_bytes(), b'original')
+            self.assertFalse(list(Path(tmp).glob('*.part')))
+            self.assertNotIn(port.content.hex(), capture.path.read_text())
+
+    def test_loss_and_corruption_retry_same_offset_with_diagnostics(self):
+        port = SatellitePort()
+        original_write = port.write
+        attempts = []
+        def write(data):
+            request_id, fields = rf.decode(data.strip())
+            if fields[0] == 'READ' and int(fields[2]) == 256:
+                attempts.append(request_id)
+                if len(attempts) <= 2:
+                    return len(data)
+                if len(attempts) == 3:
+                    port.rx.extend(b'bad response\n')
+                    return len(data)
+            return original_write(data)
+        port.write = write
+        events = []
+        client = rf.Client(port, timeout=0.015, diagnostic=lambda event, **info: events.append((event, info)))
+        with tempfile.TemporaryDirectory() as tmp:
+            destination = Path(tmp)/'received.bin'
+            client.download('/data.bin', destination)
+            self.assertEqual(destination.read_bytes(), port.content)
+        self.assertEqual(len(set(attempts)), 1)
+        self.assertEqual(client.counters, dict(retries=3, timeouts=3, malformed=1, stale=0))
+        self.assertEqual(sum(event == 'retry' for event, _ in events), 3)
+        self.assertEqual(sum(event == 'timeout' for event, _ in events), 3)
+
+    def test_unwritable_capture_does_not_abort_download(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            blocked = Path(tmp)/'blocked'
+            blocked.write_text('file, not a directory')
+            capture = Capture({}, directory=blocked)
+            self.assertTrue(capture.error)
+            port = SatellitePort()
+            destination = Path(tmp)/'result'
+            rf.Client(port, diagnostic=capture.record).download('/data.bin', destination)
+            capture.close('downloaded')
+            self.assertEqual(destination.read_bytes(), port.content)
+            capture = Capture({}, directory=tmp)
+            with patch.object(capture.stream, 'write', side_effect=OSError('disk full')):
+                rf.Client(port, diagnostic=capture.record).download('/data.bin', destination)
+            self.assertIn('disk full', capture.error)
+            capture.close('downloaded')
+            self.assertEqual(destination.read_bytes(), port.content)
+
+    def test_capture_rotation_preserves_valid_metadata_and_final_status(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            capture = Capture(dict(path='/test.bin'), directory=tmp, max_bytes=2048)
+            for offset in range(100):
+                capture.record('timeout', operation='READ', offset=offset)
+            capture.close('failed', detail='test failure')
+            for path in (capture.path, Path(str(capture.path)+'.1')):
+                self.assertLessEqual(path.stat().st_size, 2048)
+                self.assertTrue(all(isinstance(json.loads(line), dict) for line in path.read_text().splitlines()))
+            last = json.loads(capture.path.read_text().splitlines()[-1])
+            self.assertEqual((last['event'], last['status']), ('finished', 'failed'))
 
 
 class TabTests(unittest.TestCase):

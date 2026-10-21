@@ -75,12 +75,15 @@ def unsigned(text, maximum=0xffffffff):
 
 
 class Client:
-    def __init__(self, port, cancel=None, progress=None, timeout=4.0, attempts=4):
+    def __init__(self, port, cancel=None, progress=None, timeout=4.0, attempts=4, diagnostic=None):
         self.port = port
         self.cancel = cancel or threading.Event()
         self.progress = progress or (lambda **info: None)
         self.timeout = timeout
         self.attempts = attempts
+        self.diagnostic = diagnostic
+        self.counters = dict(retries=0, timeouts=0, malformed=0, stale=0)
+        self._attempt = 0
         self._id = secrets.randbits(32)
         self._buffer = bytearray()
         self._discard = False
@@ -89,13 +92,47 @@ class Client:
         if self.cancel.is_set():
             raise Cancelled('Operation cancelled')
 
+    def _record(self, event, **details):
+        if self.diagnostic is not None:
+            self.diagnostic(event, **details)
+
     def request(self, op, *args, expected=None):
+        started = time.monotonic()
+        context = dict(operation=op, request=f'{(self._id+1) & 0xffffffff:08x}')
+        if op == 'READ' and len(args) > 1:
+            context['offset'] = args[1]
+        self._attempt = 0
+        self._record('request', **context)
+        try:
+            result = self._request(op, *args, expected=expected)
+        except Exception as exc:
+            elapsed = time.monotonic()-started
+            detail = (f'{exc} [operation={op}' +
+                      (f' offset={context["offset"]}' if 'offset' in context else '') +
+                      f' request={context["request"]} attempt={self._attempt}/{self.attempts}' +
+                      f' elapsed={elapsed:.2f}s]')
+            self._record('request_failed', **context, attempt=self._attempt,
+                         elapsed_s=elapsed, error=detail, counters=dict(self.counters))
+            if isinstance(exc, Cancelled):
+                raise
+            if isinstance(exc, RemoteError):
+                raise RemoteError(detail) from exc
+            raise
+        self._record('reply', **context, attempt=self._attempt,
+                     elapsed_s=time.monotonic()-started, counters=dict(self.counters))
+        return result
+
+    def _request(self, op, *args, expected=None):
         self._id = (self._id + 1) & 0xffffffff
         request_id = self._id
         frame = encode(request_id, op, *args)
         for attempt in range(self.attempts):
+            self._attempt = attempt+1
             self._check_cancel()
             if attempt:
+                self.counters['retries'] += 1
+                self._record('retry', operation=op, request=f'{request_id:08x}',
+                             attempt=attempt+1, offset=args[1] if op == 'READ' else None)
                 self.progress(status=f'No valid reply; retry {attempt}/{self.attempts-1}', retry=1)
             # Prepending newline also terminates any truncated previous request.
             outgoing = b'\n' + frame
@@ -112,10 +149,17 @@ class Client:
                         reply = None if self._discard else decode(bytes(self._buffer))
                         self._buffer.clear()
                         self._discard = False
-                        if reply is None or reply[0] != request_id:
+                        if reply is None:
+                            self.counters['malformed'] += 1
+                            continue
+                        if reply[0] != request_id:
+                            self.counters['stale'] += 1
                             continue
                         fields = reply[1]
                         if fields[0] == 'ERR':
+                            if len(fields) == 6 and fields[1] == 'READ_FAILED':
+                                raise RemoteError(f'Satellite: READ_FAILED offset={fields[2]} '
+                                    f'wanted={fields[3]} got={fields[4]} attempts={fields[5]}')
                             raise RemoteError('Satellite: ' + ' '.join(fields[1:]))
                         if expected and fields[0] not in expected:
                             raise RemoteError(f'Unexpected satellite response: {fields[0]}')
@@ -126,6 +170,10 @@ class Client:
                         else:
                             self._buffer.clear()
                             self._discard = True
+            self.counters['timeouts'] += 1
+            self._record('timeout', operation=op, request=f'{request_id:08x}',
+                         attempt=attempt+1, offset=args[1] if op == 'READ' else None,
+                         counters=dict(self.counters))
         detail = 'Satellite did not reply. Check Lab 8 firmware, SD card, radio link and baud rate.'
         diagnostic = getattr(self.port, 'diagnostic_summary', None)
         if callable(diagnostic):

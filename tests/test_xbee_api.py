@@ -198,6 +198,26 @@ class ApiTests(unittest.TestCase):
                 finally:
                     port.close()
 
+    def test_twenty_legacy_downloads_with_rssi_on_and_off(self):
+        for polling in (False, True):
+            with self.subTest(polling=polling):
+                peer = SatellitePort()
+                peer.content = bytes(range(256))*56+b'+++\x00\xff'
+                raw, port = self.connect(peer)
+                raw.baudrate = 115200
+                raw.receive_format = 'legacy16'
+                port.set_rssi_polling(polling)
+                with tempfile.TemporaryDirectory() as tmp:
+                    destination = Path(tmp)/'result.bin'
+                    for _ in range(20):
+                        Client(port, timeout=1).download('/data.bin', destination)
+                        self.assertEqual(destination.read_bytes(), peer.content)
+                if polling:
+                    self.wait(lambda: port.traffic_snapshot()['rssi'] == -55)
+                else:
+                    self.assertFalse(any(command == b'DB' for command, _ in raw.commands))
+                self.assertEqual(len(raw.readers), 1)
+
     def test_no_reply_includes_api_diagnostics(self):
         raw, port = self.connect()
         # A successful RF delivery does not establish a firmware response.

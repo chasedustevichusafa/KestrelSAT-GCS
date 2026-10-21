@@ -6,6 +6,7 @@ from tkinter import ttk, filedialog
 import tkinter as tk
 
 from . import remote_files
+from .transfer_diagnostics import Capture
 
 
 class RemoteFilesTab:
@@ -173,6 +174,10 @@ class RemoteFilesTab:
                 post('progress', **info)
                 last_progress = now
 
+        capture = Capture(dict(action=action, path=path,
+            baud=getattr(port, 'baudrate', None),
+            mode='API' if getattr(port, 'api_mode', False) else 'Transparent',
+            rssi_polling=getattr(stats, 'rssi_enabled', False)))
         result = {'event': 'failed', 'detail': 'Operation did not complete'}
         try:
             with self.app._serial_read_lock:
@@ -182,7 +187,7 @@ class RemoteFilesTab:
                 try:
                     port.timeout = 0.1
                     port.write_timeout = 5.0 if getattr(port, 'api_mode', False) else 1.0
-                    client = remote_files.Client(port, cancel=cancel, progress=progress)
+                    client = remote_files.Client(port, cancel=cancel, progress=progress, diagnostic=capture.record)
                     if action == 'list':
                         entries = client.list_directory(path)
                         result = dict(event='listed', entries=entries, path=path)
@@ -201,6 +206,15 @@ class RemoteFilesTab:
             if stats is not None:
                 stats.finish('completed' if result['event'] == 'downloaded' else
                              'cancelled' if result['event'] == 'cancelled' else 'failed')
+            try:
+                radio = port.traffic_snapshot() if hasattr(port, 'traffic_snapshot') else {}
+                if hasattr(port, 'diagnostic_summary'):
+                    radio['api_summary'] = port.diagnostic_summary()
+            except Exception as exc:
+                radio = {'error': str(exc)}
+            capture.close(result['event'], detail=result.get('detail', ''), radio=radio)
+            result['diagnostic_path'] = str(capture.path) if capture.path else ''
+            result['diagnostic_error'] = capture.error
             self.app._transfer_active.clear()
             post(**result)
 
@@ -219,6 +233,10 @@ class RemoteFilesTab:
                 self.status.set(info['status'])
             return
         self._set_busy(False)
+        if info.get('diagnostic_path'):
+            self.app.log_message('Remote Files diagnostics: ' + info['diagnostic_path'], 'SYSTEM')
+        if info.get('diagnostic_error'):
+            self.app.log_message('Remote Files diagnostics unavailable: ' + info['diagnostic_error'], 'ERROR')
         # Delayed events after a disconnect cannot restore stale SD listings.
         if not self.app.is_connected:
             self.invalidate()
