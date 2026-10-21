@@ -69,9 +69,36 @@ write the change, close XCTU, then choose **Transparent** in the GCS. Both radio
 modes provide rate graphs and CSV/PNG export; RSSI requires API mode.
 
 [Digi's AP documentation](https://docs.digi.com/resources/documentation/digidocs/90002002/Reference/r_cmd_AP.htm)
-defines AP=0/1/2. The supplied XBee 3 Zigbee XCTU profile also defines AP=1 as
+defines AP=0/1/2. The supplied XBee 3 802.15.4 XCTU profile also defines AP=1 as
 "API Mode Without Escapes" and DB as the magnitude of the last good packet RSSI
 (e.g. `0x58` is displayed as **-88 dBm**).
+
+## Legacy receive compatibility — 2026-10-21
+
+The lab's `KestrelSAT_omni_profile_2014.xpro` includes the XB3-24A 2014 radio
+configuration. Its **AO — API Output Mode** defaults to **2**, which emits legacy
+802.15.4 receive frames (`0x80`/`0x81`). Earlier versions of this feature build
+accepted only `0x90`/`0x91`, so local API initialization could succeed while
+satellite replies were silently ignored and Remote Files timed out.
+
+The updated GCS accepts all four receive formats, removes the correct radio
+header, and passes only the RF payload to the file service. Keep the existing
+AO setting; no satellite firmware change is needed for this receive fix.
+The ground radio must still use AP=1 and the GCS **XBee API (AP=1)** mode; the
+satellite must remain AP=0. Both ground modes also support the matched 115200
+firmware/radio configuration described below.
+
+API-mode Remote Files timeouts now append the configured destination, latest
+RF delivery status, accepted/filtered receive-packet counts, and API frame-type
+counts. Copy the complete error from the monitor if a hardware test still fails.
+A delivery status of `0x00` confirms radio delivery, not a firmware response.
+Legacy short-address receive frames contain no 64-bit source serial number:
+source filtering uses a configured short destination when available, while a
+64-bit source check is available only for frames carrying that address.
+
+The regression tests reproduce both legacy receive types at 115200 with the
+lab profile's broadcast destination, directory browsing, verified binary
+downloads, and concurrent RSSI polling. Physical-radio validation remains required.
 
 ## Optional 115200-baud test — 2026-10-21
 
@@ -120,7 +147,7 @@ QT_QPA_PLATFORM=offscreen xvfb-run -a python tests/run_all.py
 
 `test_transfer_stats.py` verifies rates, stalls, retransmission/resume accounting,
 CSV retention, and all three real PNG exports. `test_xbee_api.py` verifies API
-checksums/fragmentation, data/status/AT separation, explicit receive frames,
+checksums/fragmentation, data/status/AT separation, legacy and explicit receive frames,
 transmit errors/timeouts, RSSI pacing, shutdown, and KFS downloads through a
 simulated API radio. The existing Lab 8 C++/Python compatibility tests remain
 applicable. Automated tests do not establish physical radio performance.

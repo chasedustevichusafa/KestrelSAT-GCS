@@ -126,7 +126,11 @@ class Client:
                         else:
                             self._buffer.clear()
                             self._discard = True
-        raise RemoteError('Satellite did not reply. Check Lab 8 firmware, SD card, radio link and baud rate.')
+        detail = 'Satellite did not reply. Check Lab 8 firmware, SD card, radio link and baud rate.'
+        diagnostic = getattr(self.port, 'diagnostic_summary', None)
+        if callable(diagnostic):
+            detail += ' ' + diagnostic()
+        raise RemoteError(detail)
 
     def hello(self):
         reply = self.request('HELLO', expected={'HELLO'})

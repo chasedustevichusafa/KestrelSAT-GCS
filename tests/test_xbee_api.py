@@ -32,6 +32,8 @@ class Radio:
         self.delivery_status = 0
         self.db_supported = True
         self.drop_tx_status = False
+        self.receive_format = 'modern'
+        self.destination = DESTINATION
 
     @property
     def in_waiting(self):
@@ -44,6 +46,12 @@ class Radio:
             self.condition.notify_all()
 
     def rf(self, data, explicit=False, source=DESTINATION):
+        if self.receive_format == 'legacy64':
+            self.enqueue(b'\x80'+source.to_bytes(8, 'big')+b'\x37\x00'+data)
+            return
+        if self.receive_format == 'legacy16':
+            self.enqueue(b'\x81\x12\x34\x37\x00'+data)
+            return
         header = b'\x91' + source.to_bytes(8,'big') + b'\xff\xfe\xe8\xe8\x00\x11\xc1\x05\x01' if explicit else (
             b'\x90' + source.to_bytes(8,'big') + b'\xff\xfe\x01')
         self.enqueue(header+data)
@@ -55,8 +63,8 @@ class Radio:
             if packet[0] == 8:
                 command = packet[2:4]
                 self.commands.append((command, time.monotonic()))
-                replies = {b'AP': b'\x01', b'DH': (DESTINATION >> 32).to_bytes(4,'big'),
-                           b'DL': (DESTINATION & 0xffffffff).to_bytes(4,'big'), b'NP': b'\x40', b'DB': b'\x37'}
+                replies = {b'AP': b'\x01', b'DH': (self.destination >> 32).to_bytes(4,'big'),
+                           b'DL': (self.destination & 0xffffffff).to_bytes(4,'big'), b'NP': b'\x40', b'DB': b'\x37'}
                 status = 1 if command == b'DB' and not self.db_supported else 0
                 # An unrelated AT reply with the same frame ID must not satisfy the query.
                 self.enqueue(bytes([0x88,packet[1]])+b'ZZ\x00noise')
@@ -84,7 +92,7 @@ class Radio:
         return len(data)
 
     def assert_destination(self, packet):
-        assert int.from_bytes(packet[2:10],'big') == DESTINATION
+        assert int.from_bytes(packet[2:10],'big') == self.destination
         assert len(packet[14:]) <= 64
 
     def read(self, n=1):
@@ -142,6 +150,59 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(port.read(12),b'hello\x00\x7eworld')
         self.assertEqual(len(raw.readers),1)
         self.assertEqual(port.in_waiting,0)
+
+    def test_legacy_receive_headers_filtering_and_binary_payload(self):
+        raw, port = self.connect()
+        # Legacy 64-bit: type, source64, RSSI, options, RF bytes.
+        raw.enqueue(bytes.fromhex('80 0013a20040b90002 37 00')+b'wrong-peer')
+        raw.enqueue(bytes.fromhex('80 0013a20040b90001 37 00')+b'hello\x00\x7e')
+        # Legacy 16-bit: type, source16, RSSI, options, RF bytes.
+        raw.enqueue(bytes.fromhex('81 1234 37 00')+b'world')
+        self.wait(lambda: port.in_waiting >= 12)
+        self.assertEqual(port.read(12), b'hello\x00\x7eworld')
+        self.assertIn('filtered=1', port.diagnostic_summary())
+        self.assertIn('0x80:2', port.diagnostic_summary())
+        self.assertIn('0x81:1', port.diagnostic_summary())
+        # Reject truncated headers; they must not leak into serial payloads.
+        for packet in (b'\x80'+b'\x00'*9, b'\x81'+b'\x00'*3):
+            port._dispatch(packet)
+        self.assertEqual(port.in_waiting, 0)
+        port.destination = 0x1234
+        raw.enqueue(bytes.fromhex('81 4321 37 00')+b'wrong-short-peer')
+        raw.enqueue(bytes.fromhex('81 1234 37 00')+b'right-short-peer')
+        self.wait(lambda: port.in_waiting > 0)
+        self.assertEqual(port.read(16), b'right-short-peer')
+
+    def test_lab_profile_legacy_frames_browse_and_download(self):
+        # Lab profile: DL=FFFF broadcast, AO=2 legacy receive output.
+        # Exercise both MY=FFFF (source64) and short MY (source16).
+        for receive_format in ('legacy64', 'legacy16'):
+            with self.subTest(receive_format=receive_format):
+                peer = SatellitePort()
+                raw = Radio(peer)
+                raw.receive_format = receive_format
+                raw.destination = 0xffff
+                raw.baudrate = 115200
+                port = ApiSerial(raw).initialize()
+                try:
+                    port.set_rssi_polling(True)
+                    client = Client(port, timeout=1)
+                    self.assertEqual(len(client.list_directory('/')), 2)
+                    with tempfile.TemporaryDirectory() as tmp:
+                        destination = Path(tmp)/'binary.bin'
+                        client.download('/data.bin', destination)
+                        self.assertEqual(destination.read_bytes(), peer.content)
+                    self.wait(lambda: port.traffic_snapshot()['rssi'] == -55)
+                    self.assertEqual(port.in_waiting, 0)
+                    self.assertEqual(len(raw.readers), 1)
+                finally:
+                    port.close()
+
+    def test_no_reply_includes_api_diagnostics(self):
+        raw, port = self.connect()
+        # A successful RF delivery does not establish a firmware response.
+        with self.assertRaisesRegex(Exception, 'delivery=0x00; RF packets=0'):
+            Client(port, timeout=0.01, attempts=1).hello()
 
     def test_transmit_chunking_and_delivery_errors(self):
         raw, port = self.connect()

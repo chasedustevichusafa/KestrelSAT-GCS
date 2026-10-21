@@ -1,9 +1,8 @@
-"""XBee Zigbee AP=1 transport: one raw reader, demultiplexed data/AT/status frames.
+"""XBee AP=1 transport: one raw reader, demultiplexed data/AT/status frames.
 
 The satellite radio may remain transparent. No +++ command mode or radio writes
 are used here. Local AP/DH/DL/NP queries use API AT frames only.
 """
-from collections import deque
 import threading
 import time
 import serial
@@ -117,6 +116,9 @@ class ApiSerial:
         self._rx = self._tx = self._radio_retries = 0
         self._packet_at = self._rssi_at = self._rssi = None
         self._packet_number = 0
+        self._frame_counts = {}
+        self._filtered_packets = 0
+        self._last_delivery = None
         self._rssi_error = 'No RSSI reading yet'
         self._transfer_cancel = None
         self.destination = None
@@ -216,11 +218,28 @@ class ApiSerial:
     def _dispatch(self, packet):
         with self._condition:
             kind = packet[0]
-            if (kind == 0x90 and len(packet) >= 12) or (kind == 0x91 and len(packet) >= 18):
-                source = int.from_bytes(packet[1:9], 'big')
-                if self.destination not in (None, 0, 0xffff) and source != self.destination:
+            self._frame_counts[kind] = self._frame_counts.get(kind, 0)+1
+            # The course's XB3-24A 2014 profile defaults to AO=2, which
+            # outputs legacy 802.15.4 receive frames even with AP=1.
+            header = {0x80: 11, 0x81: 5, 0x90: 12, 0x91: 18}.get(kind)
+            if header is not None and len(packet) >= header:
+                if kind == 0x81:
+                    source = int.from_bytes(packet[1:3], 'big')
+                    # A short-address frame contains no source serial number.
+                    # Filter configured short unicasts; 64-bit destinations
+                    # cannot be compared to these 16-bit source addresses.
+                    wrong_peer = (self.destination is not None and
+                                  0 < self.destination < 0xffff and
+                                  source != self.destination)
+                else:
+                    source = int.from_bytes(packet[1:9], 'big')
+                    wrong_peer = (self.destination is not None and
+                                  self.destination > 0xffff and
+                                  source != self.destination)
+                if wrong_peer:
+                    self._filtered_packets += 1
                     return
-                data = packet[12 if kind == 0x90 else 18:]
+                data = packet[header:]
                 if len(self._payload)+len(data) > MAX_RX:
                     raise serial.SerialException('XBee payload queue overflow; transfer stopped')
                 self._payload.extend(data)
@@ -233,6 +252,7 @@ class ApiSerial:
                         pending['response'] = packet
                         if kind == 0x8b:
                             self._radio_retries += packet[4]
+                            self._last_delivery = packet[5]
             self._condition.notify_all()
 
     def _read_loop(self):
@@ -284,6 +304,17 @@ class ApiSerial:
         with self._condition:
             return dict(rx=self._rx, tx=self._tx, rssi=self._rssi, rssi_at=self._rssi_at,
                         packet_at=self._packet_at, radio_retries=self._radio_retries, rssi_error=self._rssi_error)
+
+    def diagnostic_summary(self):
+        """Bounded metadata for a failed request; never includes file payloads."""
+        with self._condition:
+            frames = ', '.join(f'0x{kind:02x}:{count}'
+                               for kind, count in sorted(self._frame_counts.items())) or 'none'
+            destination = f'{self.destination:016x}' if self.destination is not None else 'unset'
+            delivery = 'none' if self._last_delivery is None else f'0x{self._last_delivery:02x}'
+            return (f'XBee API: destination={destination}; delivery={delivery}; '
+                    f'RF packets={self._packet_number}; filtered={self._filtered_packets}; '
+                    f'frames=[{frames}]')
 
     @property
     def baudrate(self):

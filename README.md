@@ -67,6 +67,10 @@ choose **Download...**. Downloads are read-only and restart after interruption.
 
 ### Dated changes
 
+- **2026-10-21 — XBee API receive compatibility:** Added legacy `0x80`/`0x81`
+  receive support for the supplied lab radio profile's default `AO=2` output.
+  API-mode file timeouts now include radio delivery and received-frame diagnostics.
+  Transparent-mode file transfers remain available while API hardware testing continues.
 - **2026-10-20 — Hardware integration confirmed:** The project owner confirmed
   that the Windows GCS and Lab 8 firmware work together on the KestrelSAT/XBee
   hardware for the remote file-transfer milestone.
