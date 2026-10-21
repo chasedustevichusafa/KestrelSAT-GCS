@@ -9,7 +9,7 @@ import time
 
 class Capture:
     def __init__(self, context, directory='transfer_diagnostics', max_bytes=2*1024*1024):
-        self.context = dict(context, client='KFS1 stability-1')
+        self.context = dict(context, client='KFS1 upload-1')
         self.max_bytes = max_bytes
         self.path = None
         self.stream = None
@@ -31,7 +31,7 @@ class Capture:
             return
         now = time.monotonic()
         # One successful read checkpoint per second; always keep failures/retries.
-        if event in ('request', 'reply') and details.get('operation') == 'READ':
+        if event in ('request', 'reply') and details.get('operation') in ('READ', 'WRITE', 'VERIFY'):
             if event == 'request' or now-self._last_reply < 1:
                 return
             self._last_reply = now

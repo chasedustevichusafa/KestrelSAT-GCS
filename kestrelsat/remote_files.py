@@ -1,4 +1,4 @@
-"""KFS1 read-only SD browser/download client. No GUI or platform dependencies.
+"""KFS1 SD browser and verified upload/download client. No GUI or platform dependencies.
 
 The same framed protocol is implemented in Lab 8's file_service.h. Serial reads
 must be exclusively owned by this client for the duration of an operation.
@@ -6,6 +6,7 @@ must be exclusively owned by this client for the duration of an operation.
 from dataclasses import dataclass
 from pathlib import Path
 import os
+import re
 import secrets
 import tempfile
 import threading
@@ -19,6 +20,10 @@ MAX_ENTRIES = 4096
 
 
 class RemoteError(Exception):
+    pass
+
+
+class UploadUncertain(RemoteError):
     pass
 
 
@@ -65,6 +70,20 @@ def path_hex(path):
     return raw.hex()
 
 
+def partial_path(path):
+    return bool(re.fullmatch(r'\.kfs-[0-9a-f]{8}\.part', path.rsplit('/', 1)[-1]))
+
+
+def upload_path_hex(path):
+    encoded = path_hex(path)
+    name = path.rsplit('/', 1)[-1]
+    if (not name or name.casefold().startswith('.kfs-') or any(c in path for c in '<>:"|?*') or
+            any(part.endswith(('.', ' ')) for part in path[1:].split('/')) or
+            len(path[:len(path)-len(name)].encode('utf-8'))+18 > MAX_PATH):
+        raise RemoteError('Choose an SD filename without reserved characters or a .kfs- prefix')
+    return encoded
+
+
 def unsigned(text, maximum=0xffffffff):
     if not text.isascii() or not text.isdigit() or len(text) > 10:
         raise RemoteError('Invalid number in satellite response')
@@ -99,7 +118,7 @@ class Client:
     def request(self, op, *args, expected=None):
         started = time.monotonic()
         context = dict(operation=op, request=f'{(self._id+1) & 0xffffffff:08x}')
-        if op == 'READ' and len(args) > 1:
+        if op in ('READ', 'WRITE', 'VERIFY') and len(args) > 1:
             context['offset'] = args[1]
         self._attempt = 0
         self._record('request', **context)
@@ -132,7 +151,7 @@ class Client:
             if attempt:
                 self.counters['retries'] += 1
                 self._record('retry', operation=op, request=f'{request_id:08x}',
-                             attempt=attempt+1, offset=args[1] if op == 'READ' else None)
+                             attempt=attempt+1, offset=args[1] if op in ('READ', 'WRITE', 'VERIFY') and len(args) > 1 else None)
                 self.progress(status=f'No valid reply; retry {attempt}/{self.attempts-1}', retry=1)
             # Prepending newline also terminates any truncated previous request.
             outgoing = b'\n' + frame
@@ -157,8 +176,8 @@ class Client:
                             continue
                         fields = reply[1]
                         if fields[0] == 'ERR':
-                            if len(fields) == 6 and fields[1] == 'READ_FAILED':
-                                raise RemoteError(f'Satellite: READ_FAILED offset={fields[2]} '
+                            if len(fields) == 6 and fields[1] in ('READ_FAILED', 'WRITE_FAILED', 'VERIFY_READ_FAILED'):
+                                raise RemoteError(f'Satellite: {fields[1]} offset={fields[2]} '
                                     f'wanted={fields[3]} got={fields[4]} attempts={fields[5]}')
                             raise RemoteError('Satellite: ' + ' '.join(fields[1:]))
                         if expected and fields[0] not in expected:
@@ -172,7 +191,7 @@ class Client:
                             self._discard = True
             self.counters['timeouts'] += 1
             self._record('timeout', operation=op, request=f'{request_id:08x}',
-                         attempt=attempt+1, offset=args[1] if op == 'READ' else None,
+                         attempt=attempt+1, offset=args[1] if op in ('READ', 'WRITE', 'VERIFY') and len(args) > 1 else None,
                          counters=dict(self.counters))
         detail = 'Satellite did not reply. Check Lab 8 firmware, SD card, radio link and baud rate.'
         diagnostic = getattr(self.port, 'diagnostic_summary', None)
@@ -210,6 +229,138 @@ class Client:
             entries.append(Entry(name, reply[2] == 'D', unsigned(reply[3])))
             self.progress(status=f'Reading directory: {len(entries)} entries')
         raise RemoteError('Directory is too large')
+
+    def supports_upload(self):
+        self.hello()
+        try:
+            reply = self.request('CAPS', expected={'CAPS'})
+        except RemoteError as exc:
+            if 'Satellite: BAD_COMMAND' in str(exc):
+                return False
+            raise
+        return len(reply) >= 3 and 'UPLOAD1' in reply[1:-1] and reply[-1] == str(CHUNK)
+
+    def require_upload(self):
+        if not self.supports_upload():
+            raise RemoteError('Satellite firmware needs the upload update; downloads remain available')
+
+    def clean_partial(self, path):
+        encoded = path_hex(path)
+        if not partial_path(path):
+            raise RemoteError('Select a .kfs-xxxxxxxx.part upload temporary file')
+        self.require_upload()
+        if self.request('CLEAN', encoded, expected={'REMOVED'}) != ['REMOVED']:
+            raise RemoteError('Unexpected partial-file cleanup reply')
+
+    def _upload_cleanup(self, op, token):
+        # Cleanup/status must still work after Cancel; keep it bounded and hold
+        # the same exclusive port ownership as the transfer.
+        old_cancel, old_timeout, old_attempts = self.cancel, self.timeout, self.attempts
+        old_write_timeout = self.port.write_timeout
+        fresh = threading.Event()
+        self.cancel, self.timeout, self.attempts = fresh, 0.7, 2
+        self.port.write_timeout = 0.7
+        setter = getattr(self.port, 'set_transfer_cancel', None)
+        if setter:
+            setter(fresh)
+        try:
+            return self.request(op, token)
+        except Exception:
+            return None
+        finally:
+            self.cancel, self.timeout, self.attempts = old_cancel, old_timeout, old_attempts
+            self.port.write_timeout = old_write_timeout
+            if setter:
+                setter(old_cancel)
+
+    def upload(self, source, path):
+        encoded = upload_path_hex(path)
+        self.require_upload()
+        token = None
+        started = time.monotonic()
+        completed = commit_started = False
+        failure = None
+        total = expected_crc = 0
+        expected_stored = None
+        try:
+            with Path(source).open('rb') as local:
+                source_stat = os.fstat(local.fileno())
+                total = source_stat.st_size
+                if total > 0xffffffff:
+                    raise RemoteError('File exceeds the satellite 4 GiB minus one byte limit')
+                self.progress(done=0, total=total, elapsed=0, status='Calculating file checksum...')
+                remaining = total
+                while remaining:
+                    self._check_cancel()
+                    block = local.read(min(65536, remaining))
+                    if not block:
+                        raise RemoteError('Local source changed while calculating checksum')
+                    expected_crc = zlib.crc32(block, expected_crc)
+                    remaining -= len(block)
+                if local.read(1):
+                    raise RemoteError('Local source changed while calculating checksum')
+                local.seek(0)
+                self._check_cancel()
+                # PUT's request ID is also its session token. Knowing it before
+                # the reply permits ABORT even if every READY reply is lost.
+                token = f'{(self._id+1) & 0xffffffff:08x}'
+                ready = self.request('PUT', encoded, total, f'{expected_crc:08x}', expected={'READY'})
+                if ready != ['READY', token, str(total)]:
+                    raise RemoteError('Invalid upload session metadata')
+                done = sent_crc = 0
+                while done < total:
+                    self._check_cancel()
+                    block = local.read(min(CHUNK, total-done))
+                    if len(block) != min(CHUNK, total-done):
+                        raise RemoteError('Local source changed during upload')
+                    reply = self.request('WRITE', token, done, block.hex(), expected={'ACK'})
+                    if reply != ['ACK', str(done+len(block)), str(total)]:
+                        raise RemoteError('Incorrect satellite upload acknowledgment')
+                    done += len(block)
+                    sent_crc = zlib.crc32(block, sent_crc)
+                    self.progress(done=done, total=total, elapsed=time.monotonic()-started)
+                final_stat = os.fstat(local.fileno())
+                if (local.read(1) or sent_crc != expected_crc or final_stat.st_size != total or
+                        final_stat.st_mtime_ns != source_stat.st_mtime_ns):
+                    raise RemoteError('Local source changed during upload')
+            verified = 0
+            while True:
+                self._check_cancel()
+                reply = self.request('VERIFY', token, verified, expected={'CHECKED'})
+                next_offset = min(total, verified+1024)
+                if reply != ['CHECKED', str(next_offset), str(total)]:
+                    raise RemoteError('Incorrect satellite verification progress')
+                verified = next_offset
+                self.progress(done=total, total=total, elapsed=time.monotonic()-started,
+                              status=f'Verifying SD contents: {verified:,} / {total:,} bytes')
+                if verified == total:
+                    break
+            self._check_cancel()
+            expected_stored = ['STORED', str(total), f'{expected_crc:08x}']
+            commit_started = True
+            reply = self.request('COMMIT', token, expected={'STORED'})
+            if reply != expected_stored:
+                raise RemoteError('Satellite upload completion checksum/size mismatch')
+            completed = True
+        except Exception as exc:
+            failure = exc
+        if token is not None and not completed:
+            status = self._upload_cleanup('STATUS', token) if commit_started else None
+            if status is not None and status == expected_stored:
+                completed = True
+            else:
+                aborted = self._upload_cleanup('ABORT', token)
+                if aborted is not None and aborted == expected_stored:
+                    completed = True
+                elif commit_started and not (aborted and aborted[0] == 'ABORTED'):
+                    raise UploadUncertain('Upload completion could not be confirmed. Refresh the folder and '
+                                          'verify the destination before retrying. ' + str(failure)) from failure
+        if completed:
+            self.progress(done=total, total=total, elapsed=time.monotonic()-started, status='Upload verified')
+            return path
+        if failure is not None:
+            raise failure
+        raise RemoteError('Upload did not complete')
 
     def download(self, path, destination):
         encoded = path_hex(path)

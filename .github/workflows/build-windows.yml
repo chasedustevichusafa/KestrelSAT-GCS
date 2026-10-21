@@ -3,7 +3,7 @@ name: Windows test build
 on:
   workflow_dispatch:
   push:
-    branches: ['main', 'feature/remote-files', 'feature/transfer-statistics', 'fix/file-transfer-stability']
+    branches: ['main', 'feature/remote-files', 'feature/transfer-statistics', 'fix/file-transfer-stability', 'feature/remote-upload']
   pull_request:
     paths:
       - 'kestrelsat/**'
