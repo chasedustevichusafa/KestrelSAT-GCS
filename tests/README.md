@@ -43,3 +43,9 @@ Or run any file on its own, e.g.
 through a queue, and anything still using `root.after()` from a thread blocks
 until the actual event loop services it — a `root.update()` loop will not
 release it. The TEST MODE test would silently see zero channels otherwise.
+
+Upload coverage (2026-10-21): `test_remote_files.py` checks capability fallback,
+round trips, Tk upload/cleanup controls and upload statistics; `test_xbee_api.py`
+adds twenty legacy API upload/download round trips with RSSI polling. Lab 8
+`test/test_protocol.py` exercises the actual C++ upload service and injected
+write/verification/acknowledgment failures. Physical radio/SD checks remain separate.

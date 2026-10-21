@@ -20,9 +20,9 @@ recorded as zero-speed intervals. Duplicate/retransmitted file offsets are not
 counted twice. ZMODEM resumed bytes already held by the peer are excluded, and
 batch transfers accumulate the files transferred in this session. Upload rate
 tracks unique payload positions sent; final protocol completion determines
-success. The Lab 8 satellite remains download-only; this does not add satellite
-file uploads. Existing ZMODEM uploads are measured when used with a compatible
-receiver.
+success. The upload feature build adds [verified Remote Files uploads](remote-upload.md),
+measuring acknowledged upload offsets with the same graphs and exports. Existing
+ZMODEM uploads are measured when used with a compatible receiver.
 
 - **Export PNG...** saves the combined graphs, rate graph, or RSSI graph at 1600
   pixels wide. Combined images include the filename, protocol/direction, baud,
@@ -152,7 +152,7 @@ transmit errors/timeouts, RSSI pacing, shutdown, and KFS downloads through a
 simulated API radio. The existing Lab 8 C++/Python compatibility tests remain
 applicable. Automated tests do not establish physical radio performance.
 
-**Windows test build** runs on pushes to `feature/transfer-statistics` as well as
+**Windows test build** runs on pushes to `feature/remote-upload` and the earlier feature branches as well as
 `main` and the existing file-transfer branch. Download the completed run's
 `KestrelSAT-GCS-Windows-<commit>` artifact while signed into GitHub, extract it,
 and run `KestrelSAT_GCS.exe`. This workflow does not publish a release.

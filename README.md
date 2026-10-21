@@ -25,7 +25,7 @@ interactive rendering of live data.
 - **High-DPI Aware**: Scales itself to stay readable on 4K and other high-resolution displays
 - **ZMODEM File Transfer**: Send and receive files over the same serial link, compatible with
   `sz`/`rz`, TeraTerm, minicom and other standard ZMODEM tools
-- **Remote SD Files**: Browse satellite folders and download files over XBee with
+- **Remote SD Files**: Browse satellite folders and upload/download files over XBee with
   progress, cancellation, retries, and whole-file checksum verification
 - **Status Bar**: Connection status and samples-per-second
 - **Resize-safe**: a minimum window size plus scrollable panels, so no control
@@ -40,7 +40,7 @@ mode continues to support file transfers and rate graphs.
 
 See [transfer graphs, measurement definitions, and XCTU API-mode setup](docs/transfer-statistics.md)
 before changing the ground XBee. Satellite firmware is unchanged. These changes
-are on `feature/transfer-statistics` for hardware testing.
+are included in the current upload feature build.
 
 ## Requirements
 
@@ -54,18 +54,19 @@ starts and the serial monitor works; plotting is disabled with a warning on the 
 
 ## Remote satellite files (Lab 8)
 
-The **Remote Files** tab browses the satellite SD card and downloads files over
+The **Remote Files** tab browses the satellite SD card and transfers files over
 the existing XBee connection. It requires the matching `Astro331_Lab8_Code`
-firmware and supports verified downloads, progress, retries, and cancellation.
+firmware and supports verified uploads/downloads, progress, retries, and cancellation.
 See [setup, Windows executable download, and hardware test instructions](docs/remote-files.md).
 Live camera preview is a later milestone.
 
-Use the [matching Lab 8 firmware](https://github.com/chasedustevichusafa/Lab-8-Wireless-Image-Capture-and-Transmission/tree/feature/remote-files/Astro-331-2026-Fall/Astro331_Lab8_Code).
+Use the [matching Lab 8 firmware](https://github.com/chasedustevichusafa/Lab-8-Wireless-Image-Capture-and-Transmission/tree/feature/remote-upload/Astro-331-2026-Fall/Astro331_Lab8_Code).
 Connect to the ground XBee COM port at **9600 baud, 8N1** for the default firmware,
 or **115200 baud, 8N1** with the matching `esp32thing_plus_115200` firmware and
 radio UART settings, then open
 **Remote Files → Refresh / Open**. Double-click folders or select a file and
-choose **Download...**. Downloads are read-only and restart after interruption.
+choose **Download...**. Downloads preserve SD contents; uploads use verified temporary files and require a new name.
+Both directions restart after interruption. See [upload setup, recovery and tests](docs/remote-upload.md).
 
 ### Radio configuration and validation (2026-10-21)
 
@@ -87,7 +88,7 @@ RSSI polling, and the Windows executable built successfully. Physical testing
 of the corrected API/RSSI connection is still pending.
 
 Download feature builds from [Windows test build Actions](https://github.com/chasedustevichusafa/KestrelSAT-GCS/actions/workflows/build-windows.yml).
-Choose a successful run on `feature/transfer-statistics`, download its Windows
+Choose a successful run on `feature/remote-upload`, download its Windows
 artifact while signed into GitHub, and extract it before launching the executable.
 
 ### File-transfer stability investigation (2026-10-21)
@@ -110,6 +111,13 @@ Follow the [diagnostic procedure and hardware acceptance checklist](docs/file-tr
 
 ### Dated changes
 
+- **2026-10-21 — Verified uploads:** Added upload and partial-file cleanup controls,
+  capability detection, upload-rate/RSSI statistics and bounded write/verification
+  diagnostics. Matching firmware protects existing names and reads stored data
+  back before publication. Upload hardware testing is pending.
+- **2026-10-21 — Stability build hardware result:** The project owner confirmed
+  successful operation after the SD-read recovery changes. This does not establish
+  a physical root cause or a measured twenty-transfer acceptance result.
 - **2026-10-21 — Transfer stability diagnostics:** Added bounded metadata captures,
   contextual errors, and simulated loss/corruption stress tests. Matching firmware
   adds bounded SD read recovery and local USB SD scans; hardware validation is pending.

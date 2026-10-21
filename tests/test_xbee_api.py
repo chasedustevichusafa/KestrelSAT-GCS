@@ -218,6 +218,25 @@ class ApiTests(unittest.TestCase):
                     self.assertFalse(any(command == b'DB' for command, _ in raw.commands))
                 self.assertEqual(len(raw.readers), 1)
 
+    def test_twenty_verified_uploads_over_legacy_api_with_rssi(self):
+        peer = SatellitePort()
+        raw, port = self.connect(peer)
+        raw.receive_format = 'legacy16'
+        raw.baudrate = 115200
+        port.set_rssi_polling(True)
+        with tempfile.TemporaryDirectory() as tmp:
+            source, downloaded = Path(tmp)/'image.jpg', Path(tmp)/'downloaded.jpg'
+            payload = bytes(range(256))*56+b'+++\x00\xff'
+            source.write_bytes(payload)
+            for index in range(20):
+                target = f'/images/upload-{index}.jpg'
+                client = Client(port, timeout=1)
+                client.upload(source, target)
+                client.download(target, downloaded)
+                self.assertEqual(downloaded.read_bytes(), payload)
+        self.wait(lambda: port.traffic_snapshot()['rssi'] == -55)
+        self.assertEqual(len(raw.readers), 1)
+
     def test_no_reply_includes_api_diagnostics(self):
         raw, port = self.connect()
         # A successful RF delivery does not establish a firmware response.

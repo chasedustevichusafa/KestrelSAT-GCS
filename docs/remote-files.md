@@ -91,3 +91,9 @@ adapter and drive it with the GCS client over PTYs. They cover corrupt, dropped,
 duplicated and truncated replies, binary/empty files, nested directories, final
 checksum failure, cancellation, and disconnects. These checks verify protocol
 compatibility, not physical radio reliability; perform the hardware test above.
+
+## Verified uploads — 2026-10-21
+
+The matching upload feature build adds Upload and Remove partial controls to
+this tab. See [upload setup, protocol, recovery and hardware tests](remote-upload.md).
+Existing file names are preserved; uploads publish only after SD read-back verification.

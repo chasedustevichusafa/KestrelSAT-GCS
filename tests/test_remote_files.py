@@ -29,6 +29,11 @@ class SatellitePort:
         self.token = '00000000'
         self.offset = 0
         self.opens = 0
+        self.files = {}
+        self.upload_support = True
+        self.uploading = None
+        self.completed = {}
+        self.read_content = self.content
 
     @property
     def in_waiting(self):
@@ -45,26 +50,74 @@ class SatellitePort:
         op = command[0]
         if op == 'HELLO':
             response = ['HELLO', '1', '128']
+        elif op == 'CAPS':
+            response = ['CAPS', 'UPLOAD1', '128'] if self.upload_support else ['ERR', 'BAD_COMMAND']
+        elif op == 'PUT':
+            target = bytes.fromhex(command[1]).decode()
+            if target.lower() in ('/data.bin',) or any(path.lower() == target.lower() for path in self.files):
+                response = ['ERR', 'TARGET_EXISTS']
+            else:
+                self.uploading = dict(token=f'{request_id:08x}', target=target, size=int(command[2]),
+                                      crc=command[3], data=bytearray())
+                response = ['READY', f'{request_id:08x}', command[2]]
+        elif op in ('STATUS', 'ABORT', 'COMMIT') and command[1] in self.completed:
+            response = self.completed[command[1]]
+        elif op in ('WRITE', 'VERIFY', 'COMMIT', 'STATUS', 'ABORT'):
+            upload = self.uploading
+            if upload is None or command[1] != upload['token']:
+                response = ['ERR', 'NO_SESSION']
+            elif op == 'WRITE':
+                offset, block = int(command[2]), bytes.fromhex(command[3])
+                if offset == len(upload['data']):
+                    upload['data'].extend(block)
+                response = ['ACK', str(len(upload['data'])), str(upload['size'])]
+            elif op == 'VERIFY':
+                if f'{rf.zlib.crc32(upload["data"]):08x}' != upload['crc']:
+                    response = ['ERR', 'VERIFY_CRC_MISMATCH']
+                else:
+                    response = ['CHECKED', str(min(upload['size'], int(command[2])+1024)), str(upload['size'])]
+            elif op == 'COMMIT':
+                self.files[upload['target']] = bytes(upload['data'])
+                response = ['STORED', str(upload['size']), upload['crc']]
+                self.completed[command[1]] = response
+                self.uploading = None
+            elif op == 'STATUS':
+                response = ['UPLOADING', str(len(upload['data'])), str(upload['size'])]
+            else:
+                self.uploading = None
+                response = ['ABORTED', 'REMOVED']
+        elif op == 'CLEAN':
+            target = bytes.fromhex(command[1]).decode()
+            if target in self.files and rf.partial_path(target):
+                del self.files[target]
+                response = ['REMOVED']
+            else:
+                response = ['ERR', 'CLEAN_FAILED']
         elif op == 'LIST':
             path, index = bytes.fromhex(command[1]).decode(), int(command[2])
             entries = ([['ENTRY', '1', 'D', '0', 'images'.encode().hex()],
                         ['ENTRY', '2', 'F', str(len(self.content)), 'data.bin'.encode().hex()]]
                        if path == '/' else [['ENTRY', '1', 'F', str(len(self.content)), 'photo.jpg'.encode().hex()]])
+            for target, content in self.files.items():
+                if str(Path(target).parent).replace('\\', '/') == path:
+                    entries.append(['ENTRY', str(len(entries)+1), 'F', str(len(content)), Path(target).name.encode().hex()])
             response = entries[index] if index < len(entries) else ['END']
         elif op == 'OPEN':
             self.token = f'{request_id:08x}'
             self.offset = 0
             self.opens += 1
-            response = ['FILE', self.token, str(len(self.content))]
+            path = bytes.fromhex(command[1]).decode()
+            self.read_content = self.files.get(path, self.content)
+            response = ['FILE', self.token, str(len(self.read_content))]
         elif op == 'READ':
             if self.delay:
                 return len(data)
             offset = int(command[2])
-            block = self.content[offset:offset+128]
+            block = self.read_content[offset:offset+128]
             self.offset = offset+len(block)
             response = ['DATA', str(offset), block.hex()]
         elif op == 'END':
-            response = ['DONE', str(len(self.content)), f'{rf.zlib.crc32(self.content):08x}']
+            response = ['DONE', str(len(self.read_content)), f'{rf.zlib.crc32(self.read_content):08x}']
         elif op == 'CLOSE':
             response = ['CLOSED']
         else:
@@ -87,6 +140,27 @@ class SatellitePort:
 
 
 class ClientTests(unittest.TestCase):
+    def test_upload_capabilities_roundtrip_and_path_rules(self):
+        port = SatellitePort()
+        progress = []
+        client = rf.Client(port, progress=lambda **info: progress.append(info))
+        with tempfile.TemporaryDirectory() as tmp:
+            source, downloaded = Path(tmp)/'source', Path(tmp)/'downloaded'
+            for name, data in [('empty.txt', b''), ('binary.bin', port.content), ('photo.jpg', bytes(range(256))*56)]:
+                source.write_bytes(data)
+                path = '/images/'+name
+                client.upload(source, path)
+                client.download(path, downloaded)
+                self.assertEqual(downloaded.read_bytes(), data)
+            self.assertTrue(any('Verifying SD' in info.get('status', '') for info in progress))
+            port.upload_support = False
+            with self.assertRaisesRegex(rf.RemoteError, 'firmware needs the upload update'):
+                client.upload(source, '/old-firmware.bin')
+            self.assertNotIn('/old-firmware.bin', port.files)
+        for path in ('/bad?.jpg', '/.KFS-aBcD1234.PART', '/trailing.', '/folder /file', '/bad:thing'):
+            with self.subTest(path=path), self.assertRaises(rf.RemoteError):
+                rf.upload_path_hex(path)
+
     def test_paths_and_frame_integrity(self):
         for path in ('relative', '/../secret', '/a//b', '/a/', '/a\nb', '/a\\b', '/'+'x'*193):
             with self.subTest(path=path), self.assertRaises(rf.RemoteError):
@@ -233,6 +307,36 @@ class TabTests(unittest.TestCase):
             time.sleep(0.005)
         self.root.update()
         self.assertFalse(self.tab.busy, 'Remote Files worker did not complete')
+
+    def test_upload_ui_refresh_statistics_and_partial_cleanup(self):
+        self.assertTrue(self.tab.upload_buttons[0].instate(['disabled']))
+        self.tab.refresh(); self.finish()
+        self.assertFalse(self.tab.upload_buttons[0].instate(['disabled']))
+        source = Path(self.tmp.name)/'source.bin'
+        source.write_bytes(bytes(range(256))*56+b'+++')
+        with patch('kestrelsat.remote_tab.filedialog.askopenfilename', return_value=str(source)), \
+             patch('kestrelsat.remote_tab.simpledialog.askstring', return_value='uploaded.bin'):
+            self.tab.upload_selected()
+        self.finish()
+        self.assertEqual(self.port.files['/uploaded.bin'], source.read_bytes())
+        self.assertIn('Upload verified', self.tab.status.get())
+        self.assertTrue(any(entry.name == 'uploaded.bin' for entry in self.tab.entries.values()))
+        session = self.app.transfer_recorder.sessions[-1]
+        self.assertEqual((session.direction, session.status, session.done), ('upload', 'completed', source.stat().st_size))
+        self.assertNotIn('@KFS1', self.app.received_text.get('1.0', 'end'))
+        self.port.files['/.kfs-12345678.part'] = b'partial'
+        self.tab.refresh(); self.finish()
+        key = next(key for key, entry in self.tab.entries.items() if entry.name == '.kfs-12345678.part')
+        self.tab.tree.selection_set(key)
+        with patch('kestrelsat.remote_tab.messagebox.askyesno', return_value=True):
+            self.tab.remove_partial()
+        self.finish()
+        self.assertNotIn('/.kfs-12345678.part', self.port.files)
+        self.assertIn('Partial upload removed', self.tab.status.get())
+        self.port.upload_support = False
+        self.tab.refresh(); self.finish()
+        self.assertTrue(self.tab.upload_buttons[0].instate(['disabled']))
+        self.assertIn('updated satellite firmware', self.tab.status.get())
 
     def test_browse_download_themes_and_serial_ownership(self):
         self.tab.refresh()
