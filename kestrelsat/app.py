@@ -65,6 +65,9 @@ from . import scaling
 from . import __version__
 from . import zmodem
 from .remote_tab import RemoteFilesTab
+from .stats_tab import StatisticsTab
+from .transfer_stats import Recorder
+from .xbee_api import ApiSerial, MeteredSerial
 from .theming import ThemeManager
 from .widgets import ScrollableFrame, ToolTip
 
@@ -217,6 +220,8 @@ class SerialGUI:
         self.downloads_dir = os.path.join(os.getcwd(), "downloads")
         os.makedirs(self.downloads_dir, exist_ok=True)
         
+        self.transfer_recorder = Recorder(os.path.join(os.getcwd(), 'transfer_statistics'))
+
         # Setup GUI
         self.setup_gui()
 
@@ -282,6 +287,7 @@ class SerialGUI:
         self.create_notepad_content()
 
         self.remote_files = RemoteFilesTab(self)
+        self.transfer_stats = StatisticsTab(self)
 
         # Plot tabs, plus the '+' that adds another one. Built last so the
         # plot tabs and '+' sit to the right of the fixed tabs.
@@ -907,6 +913,12 @@ class SerialGUI:
         self.connect_btn = ttk.Button(conn_frame, text="Connect", command=self.toggle_connection)
         self.connect_btn.grid(row=0, column=5, rowspan=2, padx=(15, 0), sticky=tk.NS)
         
+        ttk.Label(conn_frame, text="Radio mode:").grid(row=2, column=0, sticky=tk.W, pady=(8, 0))
+        self.radio_mode_var = tk.StringVar(value=self.settings.get('radio_mode', 'Transparent'))
+        self.radio_mode_combo = ttk.Combobox(conn_frame, textvariable=self.radio_mode_var,
+                                            values=('Transparent', 'XBee API (AP=1)'), state='readonly', width=22)
+        self.radio_mode_combo.grid(row=2, column=1, columnspan=2, sticky=tk.W, pady=(8, 0))
+
         # Initialize variables for serial settings (moved from inline to here)
         self.databits_var = tk.StringVar(value=str(self.settings.get('data_bits', 8)))
         self.parity_var = tk.StringVar(value=self.settings.get('parity', 'None'))
@@ -1113,7 +1125,7 @@ class SerialGUI:
             parity = self.get_parity()
             stop_bits = self.get_stopbits()
             
-            self.serial_connection = serial.Serial(
+            raw_port = serial.Serial(
                 port=port,
                 baudrate=baud_rate,
                 bytesize=data_bits,
@@ -1121,6 +1133,11 @@ class SerialGUI:
                 stopbits=stop_bits,
                 timeout=0.1
             )
+            if self.radio_mode_var.get() == 'XBee API (AP=1)':
+                self.serial_connection = ApiSerial(raw_port).initialize()
+            else:
+                self.serial_connection = MeteredSerial(raw_port)
+            self.radio_mode_combo.configure(state='disabled')
             
             # Clear data if option is enabled
             if self.clear_on_connect.get():
@@ -1168,6 +1185,7 @@ class SerialGUI:
         if self._transfer_thread is not None and self._transfer_thread.is_alive():
             self._transfer_thread.join(timeout=2.0)
         self.remote_files.invalidate()
+        self.radio_mode_combo.configure(state='readonly')
         self.serial_buffer = ""  # Clear buffer on disconnect
         self.first_line_received = False  # Reset first line flag
 
@@ -1372,9 +1390,21 @@ class SerialGUI:
         self.log_message(f"ZMODEM: waiting for a file into {dest}", "SYSTEM")
         self._begin_transfer("receive", dest=dest)
 
+    def start_transfer_statistics(self, protocol, direction, name):
+        port = self.serial_connection
+        mode = 'XBee API (AP=1)' if getattr(port, 'api_mode', False) else 'Transparent'
+        return self.transfer_recorder.start(
+            protocol, direction, name, int(getattr(port, 'baudrate', self.baud_var.get())), mode, port,
+            rssi_enabled=bool(self.transfer_stats.rssi_enabled.get() and getattr(port, 'api_mode', False)))
+
     def _begin_transfer(self, direction, paths=None, dest=None, prefix=b""):
         self._transfer_cancel = threading.Event()
+        if hasattr(self.serial_connection, 'set_transfer_cancel'):
+            self.serial_connection.set_transfer_cancel(self._transfer_cancel)
         self._transfer_active.set()
+        self._zmodem_stats = self.start_transfer_statistics(
+            'ZMODEM', 'upload' if direction == 'send' else 'download',
+            os.path.basename(paths[0]) if paths else 'Waiting for file')
         self._show_transfer_dialog(direction)
 
         self._transfer_thread = threading.Thread(
@@ -1391,11 +1421,14 @@ class SerialGUI:
     def _run_transfer_owned(self, direction, paths, dest, prefix):
         """The normal reader and Remote Files cannot consume this transfer."""
         port = self.serial_connection
+        stats = self._zmodem_stats
+        outcome = 'failed'
         try:
             if port is None:
                 raise zmodem.ZModemError("serial port is not open")
 
             def progress(**kw):
+                stats.progress(**kw)
                 self._post_rx(('zmodem', dict(kw, event="progress")))
 
             if direction == "send":
@@ -1415,11 +1448,17 @@ class SerialGUI:
                     "event": "finished", "direction": "receive",
                     "files": [os.path.basename(p) for p in written],
                     "dest": dest}))
+            outcome = 'completed'
         except zmodem.ZModemCancelled as exc:
+            outcome = 'cancelled'
             self._post_rx(('zmodem', {"event": "cancelled", "detail": str(exc)}))
         except Exception as exc:  # noqa: BLE001 - surfaced in the UI below
-            self._post_rx(('zmodem', {"event": "failed", "detail": str(exc)}))
+            outcome = 'cancelled' if self._transfer_cancel.is_set() else 'failed'
+            self._post_rx(('zmodem', {"event": outcome, "detail": str(exc)}))
         finally:
+            if hasattr(port, 'set_transfer_cancel'):
+                port.set_transfer_cancel(None)
+            stats.finish(outcome)
             self._transfer_active.clear()
             self._post_rx(('zmodem', {"event": "closed"}))
 
@@ -1928,7 +1967,8 @@ class SerialGUI:
                 'baud_rate': int(self.baud_var.get()),
                 'data_bits': int(self.databits_var.get()),
                 'parity': self.parity_var.get(),
-                'stop_bits': float(self.stopbits_var.get())
+                'stop_bits': float(self.stopbits_var.get()),
+                'radio_mode': self.radio_mode_var.get()
             })
         except ValueError:
             pass
@@ -1974,6 +2014,9 @@ class SerialGUI:
         # Tear the Qt side down before the Tk root. Leaving a live QMainWindow
         # referenced from self.plot_widget/plot_curves while the interpreter
         # shuts down is a known PyQt5 segfault-on-exit ordering hazard.
+        self.transfer_stats.close()
+        if self.transfer_recorder.active:
+            self.transfer_recorder.active.finish('cancelled')
         self._suspend_tab_events = True
         for plot in self.plots:
             plot.destroy()

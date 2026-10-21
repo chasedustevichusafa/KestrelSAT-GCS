@@ -96,7 +96,7 @@ class Client:
         for attempt in range(self.attempts):
             self._check_cancel()
             if attempt:
-                self.progress(status=f'No valid reply; retry {attempt}/{self.attempts-1}')
+                self.progress(status=f'No valid reply; retry {attempt}/{self.attempts-1}', retry=1)
             # Prepending newline also terminates any truncated previous request.
             outgoing = b'\n' + frame
             if self.port.write(outgoing) != len(outgoing):
@@ -126,7 +126,11 @@ class Client:
                         else:
                             self._buffer.clear()
                             self._discard = True
-        raise RemoteError('Satellite did not reply. Check Lab 8 firmware, SD card, radio link and baud rate.')
+        detail = 'Satellite did not reply. Check Lab 8 firmware, SD card, radio link and baud rate.'
+        diagnostic = getattr(self.port, 'diagnostic_summary', None)
+        if callable(diagnostic):
+            detail += ' ' + diagnostic()
+        raise RemoteError(detail)
 
     def hello(self):
         reply = self.request('HELLO', expected={'HELLO'})

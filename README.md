@@ -31,6 +31,17 @@ interactive rendering of live data.
 - **Resize-safe**: a minimum window size plus scrollable panels, so no control
   can be pushed out of reach; Send Data and the monitor controls always stay visible
 
+## Transfer statistics and RSSI (2026-10-20)
+
+The **Transfer Stats** tab records live download/upload rates for file transfers,
+retains sessions, and exports PNG graphs and CSV measurements. Optional ground
+receiver RSSI is sampled through an **XBee API (AP=1)** connection; transparent
+mode continues to support file transfers and rate graphs.
+
+See [transfer graphs, measurement definitions, and XCTU API-mode setup](docs/transfer-statistics.md)
+before changing the ground XBee. Satellite firmware is unchanged. These changes
+are on `feature/transfer-statistics` for hardware testing.
+
 ## Requirements
 
 - Python 3.10 or newer (required by the pinned `pyqtgraph`)
@@ -50,12 +61,41 @@ See [setup, Windows executable download, and hardware test instructions](docs/re
 Live camera preview is a later milestone.
 
 Use the [matching Lab 8 firmware](https://github.com/chasedustevichusafa/Lab-8-Wireless-Image-Capture-and-Transmission/tree/feature/remote-files/Astro-331-2026-Fall/Astro331_Lab8_Code).
-Connect to the ground XBee COM port at **9600 baud, 8N1**, then open
+Connect to the ground XBee COM port at **9600 baud, 8N1** for the default firmware,
+or **115200 baud, 8N1** with the matching `esp32thing_plus_115200` firmware and
+radio UART settings, then open
 **Remote Files → Refresh / Open**. Double-click folders or select a file and
 choose **Download...**. Downloads are read-only and restart after interruption.
 
+### Radio configuration and validation (2026-10-21)
+
+The project owner confirmed that the 115200-baud configuration connects and the
+Remote Files feature works with both radios in transparent mode. For API/RSSI
+testing, use the following settings with the updated feature-build executable:
+
+| Component | UART baud | Mode |
+| --- | --- | --- |
+| Satellite firmware | 115200 | `esp32thing_plus_115200` environment |
+| Satellite XBee | 115200 | AP=0 (transparent) |
+| Ground XBee | 115200 | AP=1; existing AO=2 legacy output supported |
+| GCS Connection tab | 115200 | XBee API (AP=1) |
+
+The ground radio was confirmed to use legacy 802.15.4 receive indicators. The
+GCS now handles these `0x80`/`0x81` frames alongside `0x90`/`0x91`. All 12 GCS
+test suites passed, including simulated legacy-frame browsing/downloads and
+RSSI polling, and the Windows executable built successfully. Physical testing
+of the corrected API/RSSI connection is still pending.
+
+Download feature builds from [Windows test build Actions](https://github.com/chasedustevichusafa/KestrelSAT-GCS/actions/workflows/build-windows.yml).
+Choose a successful run on `feature/transfer-statistics`, download its Windows
+artifact while signed into GitHub, and extract it before launching the executable.
+
 ### Dated changes
 
+- **2026-10-21 — XBee API receive compatibility:** Added legacy `0x80`/`0x81`
+  receive support for the supplied lab radio profile's default `AO=2` output.
+  API-mode file timeouts now include radio delivery and received-frame diagnostics.
+  Transparent-mode file transfers remain available while API hardware testing continues.
 - **2026-10-20 — Hardware integration confirmed:** The project owner confirmed
   that the Windows GCS and Lab 8 firmware work together on the KestrelSAT/XBee
   hardware for the remote file-transfer milestone.
