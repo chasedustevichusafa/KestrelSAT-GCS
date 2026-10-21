@@ -73,6 +73,24 @@ defines AP=0/1/2. The supplied XBee 3 Zigbee XCTU profile also defines AP=1 as
 "API Mode Without Escapes" and DB as the magnitude of the last good packet RSSI
 (e.g. `0x58` is displayed as **-88 dBm**).
 
+## Optional 115200-baud test — 2026-10-21
+
+The GCS already supports 115200 through the Connection tab's **Baud Rate**
+selector. Speed graphs and API/RSSI support use the selected rate; no GCS code
+change is needed. Before selecting it, configure the ground XBee BD to 115200,
+configure the satellite XBee BD to 115200, and upload the matching
+**esp32thing_plus_115200** firmware environment. The normal **esp32thing_plus**
+firmware environment stays at 9600 for rollback.
+
+See the [115200 firmware setup and rollback procedure](https://github.com/chasedustevichusafa/Lab-8-Wireless-Image-Capture-and-Transmission/blob/feature/high-baud-link/Astro-331-2026-Fall/Astro331_Lab8_Code/README.md#optional-115200-baud-test).
+Keep each radio's API/transparent mode, pairing, and network/security settings
+unchanged. In the API-mode instructions above, substitute 115200 for 9600 only
+after changing the radio's BD setting. Do not use 115200 with the old 9600 firmware.
+
+A higher UART baud rate does not change the RF bitrate or guarantee a proportional
+speed increase. Compare the same file with polling enabled/disabled at each
+rate, and verify the received contents.
+
 ## What the RSSI plot means
 
 The GCS polls the **ground radio's local DB value** at most once per second while
