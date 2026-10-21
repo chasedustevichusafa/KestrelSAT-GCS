@@ -254,6 +254,8 @@ class RemoteFilesTab:
 
     def _start(self, action, path, destination=None):
         self.generation += 1
+        if action not in ('download', 'upload'):
+            self.app.transfer_recorder.event('activity_started', f'{action}: {path}')
         generation = self.generation
         self._set_busy(True)
         self.progress.set(0)
@@ -330,6 +332,7 @@ class RemoteFilesTab:
                             result = dict(event='renamed', destination=destination, source=path)
                         try:
                             folder = posixpath.dirname(path) or '/'
+                            self.app.transfer_recorder.event('folder_refresh', folder)
                             result.update(entries=client.list_directory(folder), path=folder)
                         except Exception as exc:
                             result['refresh_error'] = str(exc)
@@ -342,6 +345,8 @@ class RemoteFilesTab:
         except Exception as exc:
             result = dict(event='cancelled' if cancel.is_set() else 'failed', detail=str(exc))
         finally:
+            if action not in ('download', 'upload'):
+                self.app.transfer_recorder.event('activity_finished', f'{action}: {path} | {result["event"]}')
             if hasattr(port, 'set_transfer_cancel'):
                 port.set_transfer_cancel(None)
             if stats is not None:

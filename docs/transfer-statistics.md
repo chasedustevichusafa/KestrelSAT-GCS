@@ -42,6 +42,14 @@ inventing one-second samples. A final partial interval records the transfer's
 outcome. RSSI polling overhead is included in measured transfer time and serial
 traffic; compare otherwise similar runs with polling on and off to quantify it.
 
+## Multiple operations — 2026-10-21
+
+The current GCS adds **Start recording...**, **Stop recording** and **Combine
+transfers...**. Named recordings keep one timeline through transfers and idle
+periods, retain operation/configuration events, and export measurement and
+operation-summary CSVs plus full-timeline PNGs. Individual transfer sessions are
+preserved. See [multi-operation recordings](multi-operation-recordings.md).
+
 ## Ground XBee setup in XCTU
 
 Use the new feature-build executable before changing the radio. The older GCS
