@@ -41,3 +41,6 @@ downloads/
 
 # Transfer statistics CSV recordings
 transfer_statistics/
+
+# Metadata-only file-transfer diagnostic captures
+transfer_diagnostics/
