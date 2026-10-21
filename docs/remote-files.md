@@ -97,3 +97,8 @@ compatibility, not physical radio reliability; perform the hardware test above.
 The matching upload feature build adds Upload and Remove partial controls to
 this tab. See [upload setup, protocol, recovery and hardware tests](remote-upload.md).
 Existing file names are preserved; uploads publish only after SD read-back verification.
+
+## Delete and rename — 2026-10-21
+
+Matching `feature/remote-file-management` builds add file-only Delete and Rename
+controls. See [setup, limitations and lost-reply recovery](remote-file-management.md).

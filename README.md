@@ -26,7 +26,7 @@ interactive rendering of live data.
 - **ZMODEM File Transfer**: Send and receive files over the same serial link, compatible with
   `sz`/`rz`, TeraTerm, minicom and other standard ZMODEM tools
 - **Remote SD Files**: Browse satellite folders and upload/download files over XBee with
-  progress, cancellation, retries, and whole-file checksum verification
+  progress, cancellation, retries, and whole-file checksum verification; rename or delete SD files
 - **Status Bar**: Connection status and samples-per-second
 - **Resize-safe**: a minimum window size plus scrollable panels, so no control
   can be pushed out of reach; Send Data and the monitor controls always stay visible
@@ -60,13 +60,23 @@ firmware and supports verified uploads/downloads, progress, retries, and cancell
 See [setup, Windows executable download, and hardware test instructions](docs/remote-files.md).
 Live camera preview is a later milestone.
 
-Use the [matching Lab 8 firmware](https://github.com/chasedustevichusafa/Lab-8-Wireless-Image-Capture-and-Transmission/tree/feature/remote-upload/Astro-331-2026-Fall/Astro331_Lab8_Code).
+Use the [matching Lab 8 firmware](https://github.com/chasedustevichusafa/Lab-8-Wireless-Image-Capture-and-Transmission/tree/feature/remote-file-management/Astro-331-2026-Fall/Astro331_Lab8_Code).
 Connect to the ground XBee COM port at **9600 baud, 8N1** for the default firmware,
 or **115200 baud, 8N1** with the matching `esp32thing_plus_115200` firmware and
 radio UART settings, then open
 **Remote Files → Refresh / Open**. Double-click folders or select a file and
 choose **Download...**. Downloads preserve SD contents; uploads use verified temporary files and require a new name.
 Both directions restart after interruption. See [upload setup, recovery and tests](docs/remote-upload.md).
+
+### Delete and rename files (2026-10-21)
+
+Use matching `feature/remote-file-management` builds of the GCS and firmware.
+After **Refresh / Open**, select a file and choose **Rename...** or **Delete...**.
+Delete asks for confirmation of the full satellite path and permanently removes
+that file. Rename keeps the current folder and rejects existing names, including
+case-only renames. Folders are excluded; unfinished uploads use **Remove partial...**.
+See [setup, recovery and tests](docs/remote-file-management.md). Uploads were
+confirmed working on hardware; the new management controls still need that check.
 
 ### Radio configuration and validation (2026-10-21)
 
@@ -88,7 +98,7 @@ RSSI polling, and the Windows executable built successfully. Physical testing
 of the corrected API/RSSI connection is still pending.
 
 Download feature builds from [Windows test build Actions](https://github.com/chasedustevichusafa/KestrelSAT-GCS/actions/workflows/build-windows.yml).
-Choose a successful run on `feature/remote-upload`, download its Windows
+Choose a successful run on `feature/remote-file-management`, download its Windows
 artifact while signed into GitHub, and extract it before launching the executable.
 
 ### File-transfer stability investigation (2026-10-21)
@@ -111,10 +121,17 @@ Follow the [diagnostic procedure and hardware acceptance checklist](docs/file-tr
 
 ### Dated changes
 
+- **2026-10-21 — File management:** Added confirmed file deletion, same-folder
+  rename, MANAGE1 capability detection, duplicate-request replay and lost-reply
+  recovery. All 12 GCS suites, 24 firmware protocol tests and both firmware
+  baud-rate builds passed. Delete/rename hardware testing is pending.
+- **2026-10-21 — Upload hardware result:** The project owner confirmed that the
+  upload build works. This is not a measured repeated-transfer acceptance result.
+
 - **2026-10-21 — Verified uploads:** Added upload and partial-file cleanup controls,
   capability detection, upload-rate/RSSI statistics and bounded write/verification
   diagnostics. Matching firmware protects existing names and reads stored data
-  back before publication. Upload hardware testing is pending.
+  back before publication. The project owner subsequently confirmed uploads work.
 - **2026-10-21 — Stability build hardware result:** The project owner confirmed
   successful operation after the SD-read recovery changes. This does not establish
   a physical root cause or a measured twenty-transfer acceptance result.

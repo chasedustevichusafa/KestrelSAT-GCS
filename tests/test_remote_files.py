@@ -31,6 +31,8 @@ class SatellitePort:
         self.opens = 0
         self.files = {}
         self.upload_support = True
+        self.manage_support = True
+        self.mutations = {}
         self.uploading = None
         self.completed = {}
         self.read_content = self.content
@@ -51,7 +53,28 @@ class SatellitePort:
         if op == 'HELLO':
             response = ['HELLO', '1', '128']
         elif op == 'CAPS':
-            response = ['CAPS', 'UPLOAD1', '128'] if self.upload_support else ['ERR', 'BAD_COMMAND']
+            response = ['CAPS', 'UPLOAD1', *(['MANAGE1'] if self.manage_support else []), '128'] if self.upload_support else ['ERR', 'BAD_COMMAND']
+        elif op in ('DELETE', 'RENAME'):
+            if request_id in self.mutations:
+                response = self.mutations[request_id][1]
+            else:
+                path = bytes.fromhex(command[1]).decode()
+                if path not in self.files:
+                    response = ['ERR', 'FILE_UNAVAILABLE']
+                elif op == 'DELETE':
+                    del self.files[path]
+                    response = ['DELETED']
+                else:
+                    target = bytes.fromhex(command[2]).decode()
+                    if any(name.casefold() == target.casefold() for name in self.files):
+                        response = ['ERR', 'TARGET_EXISTS']
+                    else:
+                        self.files[target] = self.files.pop(path)
+                        response = ['RENAMED']
+                self.mutations[request_id] = (op, response)
+        elif op == 'RESULT':
+            previous = self.mutations.get(int(command[1], 16))
+            response = ['RESULT', previous[0], *previous[1]] if previous else ['RESULT', 'UNKNOWN']
         elif op == 'PUT':
             target = bytes.fromhex(command[1]).decode()
             if target.lower() in ('/data.bin',) or any(path.lower() == target.lower() for path in self.files):
@@ -140,6 +163,23 @@ class SatellitePort:
 
 
 class ClientTests(unittest.TestCase):
+    def test_file_management_capabilities_replies_and_guards(self):
+        port = SatellitePort()
+        port.files['/images/original.bin'] = b'contents'
+        client = rf.Client(port)
+        client.rename_file('/images/original.bin', '/images/renamed.bin')
+        self.assertEqual(port.files['/images/renamed.bin'], b'contents')
+        self.assertNotIn('/images/original.bin', port.files)
+        with self.assertRaisesRegex(rf.RemoteError, 'same folder'):
+            client.rename_file('/images/renamed.bin', '/elsewhere.bin')
+        with self.assertRaises(rf.RemoteError):
+            client.delete_file('/.kfs-12345678.part')
+        client.delete_file('/images/renamed.bin')
+        self.assertNotIn('/images/renamed.bin', port.files)
+        port.manage_support = False
+        with self.assertRaisesRegex(rf.RemoteError, 'delete/rename update'):
+            client.delete_file('/images/missing.bin')
+
     def test_upload_capabilities_roundtrip_and_path_rules(self):
         port = SatellitePort()
         progress = []
@@ -307,6 +347,54 @@ class TabTests(unittest.TestCase):
             time.sleep(0.005)
         self.root.update()
         self.assertFalse(self.tab.busy, 'Remote Files worker did not complete')
+
+    def test_delete_rename_confirmation_refresh_and_capability_controls(self):
+        self.port.files['/original.txt'] = b'preserve this'
+        self.tab.refresh(); self.finish()
+        self.assertFalse(self.tab.manage_buttons[0].instate(['disabled']))
+        def select(name):
+            self.tab.tree.selection_set(next(key for key, entry in self.tab.entries.items() if entry.name == name))
+        select('original.txt')
+        before = len(self.port.write_threads)
+        with patch('kestrelsat.remote_tab.messagebox.askyesno', return_value=False):
+            self.tab.delete_selected()
+        self.assertEqual(len(self.port.write_threads), before)
+        self.assertIn('/original.txt', self.port.files)
+        with patch('kestrelsat.remote_tab.simpledialog.askstring', return_value='renamed.txt'):
+            self.tab.rename_selected()
+        self.finish()
+        self.assertEqual(self.port.files['/renamed.txt'], b'preserve this')
+        self.assertIn('File renamed', self.tab.status.get())
+        select('renamed.txt')
+        with patch('kestrelsat.remote_tab.messagebox.askyesno', return_value=True) as confirm:
+            self.tab.delete_selected()
+            self.assertIn('/renamed.txt', confirm.call_args.args[1])
+        self.finish()
+        self.assertNotIn('/renamed.txt', self.port.files)
+        self.assertIn('File deleted', self.tab.status.get())
+        select('images')
+        with patch('kestrelsat.remote_tab.messagebox.askyesno') as confirm:
+            self.tab.delete_selected()
+            confirm.assert_not_called()
+        self.port.manage_support = False
+        self.tab.refresh(); self.finish()
+        self.assertTrue(self.tab.manage_buttons[0].instate(['disabled']))
+        self.assertFalse(self.tab.upload_buttons[0].instate(['disabled']))
+
+    def test_delete_confirmation_cannot_apply_to_changed_connection(self):
+        self.port.files['/keep.txt'] = b'keep'
+        self.tab.refresh(); self.finish()
+        key = next(key for key, entry in self.tab.entries.items() if entry.name == 'keep.txt')
+        self.tab.tree.selection_set(key)
+        before = len(self.port.write_threads)
+        def reconnect(*args, **kwargs):
+            self.tab.invalidate()
+            return True
+        with patch('kestrelsat.remote_tab.messagebox.askyesno', side_effect=reconnect):
+            self.tab.delete_selected()
+        self.assertIn('/keep.txt', self.port.files)
+        self.assertEqual(len(self.port.write_threads), before)
+        self.assertIn('changed', self.tab.status.get())
 
     def test_upload_ui_refresh_statistics_and_partial_cleanup(self):
         self.assertTrue(self.tab.upload_buttons[0].instate(['disabled']))
