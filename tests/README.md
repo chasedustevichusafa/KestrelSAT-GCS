@@ -49,3 +49,12 @@ round trips, Tk upload/cleanup controls and upload statistics; `test_xbee_api.py
 adds twenty legacy API upload/download round trips with RSSI polling. Lab 8
 `test/test_protocol.py` exercises the actual C++ upload service and injected
 write/verification/acknowledgment failures. Physical radio/SD checks remain separate.
+
+## Multi-operation statistics — 2026-10-21
+
+`test_transfer_stats.py` exercises continuous mixed-direction recordings, idle
+intervals, operation/configuration events, reconnects, partial captures without
+transfer cancellation, full-CSV combining, memory-limited graph history, overview
+decimation, logging failures and shutdown. Real Tk tests cover the combine worker,
+API browse/download event integration, themes and graph lifecycle, measurement/
+summary exports and all three PNG targets with restoration of the previous zoom.

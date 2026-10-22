@@ -1168,6 +1168,7 @@ class SerialGUI:
             # Save settings
             self.save_current_settings()
             
+            self.transfer_recorder.event('connected', f'{port} | {baud_rate} baud | {self.radio_mode_var.get()}')
             self.log_message(f"Connected to {port}", "SYSTEM")
             
         except serial.SerialException as e:
@@ -1177,6 +1178,7 @@ class SerialGUI:
     
     def disconnect(self):
         """Disconnect from serial port"""
+        self.transfer_recorder.event('disconnected', 'Serial connection closed')
         self.is_connected = False
         self.test_mode = False
         self.stop_reading.set()
@@ -1298,6 +1300,8 @@ class SerialGUI:
                 self.log_message(payload[0], payload[1])
             elif kind == 'remote_files':
                 self.remote_files.on_event(payload)
+            elif kind == 'stats_combined':
+                self.transfer_stats.on_combined(payload)
             elif kind == 'zmodem':
                 self._on_transfer_event(payload)
             elif kind == 'error':
@@ -2015,6 +2019,7 @@ class SerialGUI:
         # referenced from self.plot_widget/plot_curves while the interpreter
         # shuts down is a known PyQt5 segfault-on-exit ordering hazard.
         self.transfer_stats.close()
+        self.transfer_recorder.stop_recording('application_closed')
         if self.transfer_recorder.active:
             self.transfer_recorder.active.finish('cancelled')
         self._suspend_tab_events = True

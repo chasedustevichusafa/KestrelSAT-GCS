@@ -42,6 +42,19 @@ See [transfer graphs, measurement definitions, and XCTU API-mode setup](docs/tra
 before changing the ground XBee. Satellite firmware is unchanged. These changes
 are included in the current upload feature build.
 
+## Multi-operation recordings (2026-10-21)
+
+In **Transfer Stats**, choose **Start recording...**, run multiple transfers, then
+**Stop recording**. One timeline retains upload/download rates, RSSI, idle gaps,
+operation outcomes and connection changes. Export full measurements, an operation
+summary CSV, and PNG graphs of the full timeline or your zoomed view. **Combine
+transfers...** also combines finished sessions from the current app run using
+their original timing. Individual transfer recordings remain available.
+
+See [recording instructions, data definitions and limits](docs/multi-operation-recordings.md).
+Use the Windows artifact on `feature/multi-operation-recordings`; existing firmware
+and radio settings remain compatible.
+
 ## Requirements
 
 - Python 3.10 or newer (required by the pinned `pyqtgraph`)
@@ -98,7 +111,7 @@ RSSI polling, and the Windows executable built successfully. Physical testing
 of the corrected API/RSSI connection is still pending.
 
 Download feature builds from [Windows test build Actions](https://github.com/chasedustevichusafa/KestrelSAT-GCS/actions/workflows/build-windows.yml).
-Choose a successful run on `feature/remote-file-management`, download its Windows
+Choose a successful run on `feature/multi-operation-recordings`, download its Windows
 artifact while signed into GitHub, and extract it before launching the executable.
 
 ### File-transfer stability investigation (2026-10-21)
@@ -120,6 +133,11 @@ hardware reliability target remain to be established.
 Follow the [diagnostic procedure and hardware acceptance checklist](docs/file-transfer-stability.md).
 
 ### Dated changes
+
+- **2026-10-21 — Multi-operation statistics:** Added named continuous recordings,
+  original-time combining of finished transfers, partial-capture markers, durable
+  measurement/operation/event CSVs, and full-timeline or current-view PNG exports.
+  Firmware is unchanged. Physical multi-operation validation is pending.
 
 - **2026-10-21 — File management:** Added confirmed file deletion, same-folder
   rename, MANAGE1 capability detection, duplicate-request replay and lost-reply

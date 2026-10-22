@@ -1,17 +1,19 @@
 """Thread-safe transfer measurements, one-second sampling, and durable CSV logs."""
 from collections import deque
 import csv
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import shutil
 import threading
 import time
 import uuid
 
+from .transfer_recordings import Recording
+
 COLUMNS = ('session', 'started_utc', 'protocol', 'direction', 'file', 'baud', 'transport',
            'status', 'elapsed_s', 'interval_s', 'file_bytes', 'total_bytes',
            'download_Bps', 'upload_Bps', 'average_Bps', 'serial_rx_Bps', 'serial_tx_Bps',
-           'protocol_retries', 'radio_tx_retries', 'rssi_dBm', 'rssi_age_s', 'rssi_polling')
+           'protocol_retries', 'radio_tx_retries', 'rssi_dBm', 'rssi_age_s', 'rssi_polling', 'sample_utc')
 
 
 def traffic(port):
@@ -23,11 +25,12 @@ def traffic(port):
 
 class Session:
     def __init__(self, directory, protocol, direction, name, baud, mode, port=None,
-                 clock=time.monotonic, rssi_enabled=False):
+                 clock=time.monotonic, rssi_enabled=False, observer=None):
         self.lock = threading.RLock()
         self.clock = clock
+        self.observer = observer
         self.started = self.last_sample = clock()
-        self.started_utc = datetime.now(timezone.utc).isoformat(timespec='seconds')
+        self.started_utc = datetime.now(timezone.utc).isoformat(timespec='microseconds')
         self.id = datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')+'-'+uuid.uuid4().hex[:8]
         self.protocol, self.direction, self.name = protocol, direction, name
         self.baud, self.mode, self.port = baud, mode, port
@@ -106,7 +109,9 @@ class Session:
                                          if current.get('radio_retries') is not None else None),
                        rssi_dBm=current.get('rssi') if valid else None,
                        rssi_age_s=age if self.rssi_enabled else None,
-                       rssi_polling=self.rssi_enabled)
+                       rssi_polling=self.rssi_enabled,
+                       sample_utc=(datetime.fromisoformat(self.started_utc)+
+                                   timedelta(seconds=elapsed)).isoformat(timespec='microseconds'))
             self.samples.append(row)
             self.last_done, self.last_sample, self.last_traffic = self.done, now, current
             if self._handle:
@@ -116,6 +121,8 @@ class Session:
                 except OSError as exc:
                     self.error = f'CSV recording stopped: {exc}'
                     self._close_log()
+            if self.observer:
+                self.observer(self, row, now)
             return row
 
     def finish(self, outcome):
@@ -136,7 +143,7 @@ class Session:
 
     def snapshot(self):
         with self.lock:
-            return dict(id=self.id, name=self.name, status=self.status, done=self.done, total=self.total,
+            return dict(started=self.started, id=self.id, name=self.name, status=self.status, done=self.done, total=self.total,
                         protocol=self.protocol, direction=self.direction, mode=self.mode, baud=self.baud,
                         retries=self.retries, error=self.error, samples=list(self.samples),
                         csv_path=str(self.csv_path), started_utc=self.started_utc,
@@ -158,13 +165,18 @@ class Recorder:
         self.lock = threading.RLock()
         self.sessions = deque(maxlen=20)
         self.active = None
+        self.recording = None
+        self.recordings = deque(maxlen=20)
+        self.combine_cancel = threading.Event()
 
     def start(self, protocol, direction, name, baud, mode, port=None, rssi_enabled=False):
         with self.lock:
             if self.active and self.active.status == 'running':
                 raise RuntimeError('A transfer statistics session is already active')
             session = Session(self.directory, protocol, direction, name, baud, mode, port,
-                              self.clock, rssi_enabled)
+                              self.clock, rssi_enabled, self._on_sample)
+            if self.recording:
+                self.recording.begin(session.snapshot(), session.started)
             self.sessions.appendleft(session)
             self.active = session
             return session
@@ -174,7 +186,105 @@ class Recorder:
             session = self.active
         if session:
             session.sample()
+        recording = self.recording
+        if recording:
+            recording.idle(self.clock())
 
     def history(self):
         with self.lock:
             return list(self.sessions)
+
+    def _on_sample(self, session, row, now):
+        recording = self.recording
+        if recording:
+            recording.ingest(session.id, row, now)
+
+    def start_recording(self, name):
+        with self.lock:
+            if self.recording:
+                raise RuntimeError('A multi-operation recording is already running')
+            session = self.active
+            if session:
+                with session.lock:
+                    now = self.clock()
+                    if session.status == 'running':
+                        session.sample(force=True, now=now)
+                    recording = Recording(self.directory, name, now)
+                    if session.status == 'running':
+                        recording.begin(session.snapshot(), now, partial=True)
+                    self.recording = recording
+            else:
+                recording = self.recording = Recording(self.directory, name, self.clock())
+            self.recordings.appendleft(recording)
+            return recording
+
+    def stop_recording(self, outcome='stopped'):
+        with self.lock:
+            recording = self.recording
+            if not recording:
+                return
+            session = self.active
+            if session:
+                with session.lock:
+                    now = self.clock()
+                    if session.status == 'running':
+                        session.sample(force=True, now=now)
+                    recording.finish(now, outcome)
+                    self.recording = None
+            else:
+                recording.finish(self.clock(), outcome)
+                self.recording = None
+
+    def event(self, event, detail):
+        recording = self.recording
+        if recording:
+            recording.event(event, detail, self.clock())
+
+    def recording_history(self):
+        with self.lock:
+            return list(self.recordings)
+
+    def combine(self, sessions, name):
+        """Stream full CSVs from finished transfers in this process, preserving gaps."""
+        sessions = sorted(set(sessions), key=lambda item: item.started)
+        if len(sessions) < 2:
+            raise ValueError('Select at least two finished transfers')
+        snapshots = [session.snapshot() for session in sessions]
+        if any(snap['status'] == 'running' for snap in snapshots):
+            raise ValueError('Wait for selected transfers to finish')
+        if any(snap['error'] for snap in snapshots):
+            raise OSError('A selected transfer has incomplete CSV data')
+        recording = Recording(self.directory, name, sessions[0].started, snapshots[0]['started_utc'])
+        try:
+            for session, snap in zip(sessions, snapshots):
+                if self.combine_cancel.is_set():
+                    raise RuntimeError('Application closing; combine stopped')
+                while session.started-recording.last_sample >= 1:
+                    if self.combine_cancel.is_set():
+                        raise RuntimeError('Application closing; combine stopped')
+                    recording.idle(recording.last_sample+1)
+                info = dict(snap, done=0)
+                recording.begin(info, session.started)
+                with session.csv_path.open(newline='', encoding='utf-8') as handle:
+                    last = None
+                    for row in csv.DictReader(handle):
+                        if self.combine_cancel.is_set():
+                            raise RuntimeError('Application closing; combine stopped')
+                        row['file_bytes'] = int(row['file_bytes'])
+                        for key in ('serial_rx_Bps', 'serial_tx_Bps', 'rssi_dBm', 'rssi_age_s',
+                                    'protocol_retries', 'radio_tx_retries'):
+                            row[key] = float(row[key]) if row.get(key) else None
+                        row['rssi_polling'] = row['rssi_polling'] == 'True'
+                        last = session.started+float(row['elapsed_s'])
+                        recording.ingest(session.id, row, last)
+                    if last is None or recording.current:
+                        raise ValueError('Selected CSV is incomplete; cannot combine it reliably')
+            recording.finish(recording.last_sample, 'completed')
+            if recording.error:
+                raise OSError(recording.error)
+        except Exception:
+            recording.finish(recording.last_sample, 'failed')
+            raise
+        with self.lock:
+            self.recordings.appendleft(recording)
+        return recording
