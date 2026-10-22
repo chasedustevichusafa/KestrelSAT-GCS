@@ -144,6 +144,8 @@ class CameraTab(RemoteFilesTab):
                         try:
                             capabilities = client.capabilities()
                             info = client.camera_info(capabilities)
+                            diagnostic.record('camera_info', model=info.model, resolution_mask=info.mask,
+                                              error=info.error, sd_ready=info.sd_ready)
                             result = dict(event='camera_listed', camera_info=info, manage_supported='MANAGE1' in capabilities)
                         except rf.Cancelled:
                             raise
@@ -154,6 +156,7 @@ class CameraTab(RemoteFilesTab):
                         initial = client.start_capture(destination) if action == 'camera_capture' else None
                         outcome = client.wait_capture(destination, initial)
                         result = dict(event='camera_result', outcome=outcome, pending=destination)
+                        client.capture_diagnostics(destination['job'])
                         self.app.transfer_recorder.event('camera_'+outcome['state'].lower(), path+' | '+outcome['error'])
                     try:
                         result['entries'] = client.list_directory('/images')

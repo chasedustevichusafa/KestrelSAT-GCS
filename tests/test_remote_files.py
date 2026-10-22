@@ -1,5 +1,6 @@
 """Portable KFS1 client and real Tk tab regression tests (no radio required)."""
 from pathlib import Path
+import gc
 import os
 import json
 import sys
@@ -321,6 +322,8 @@ class ClientTests(unittest.TestCase):
 
 class TabTests(unittest.TestCase):
     def setUp(self):
+        # Release previous test roots on Tk's thread before starting workers.
+        gc.collect()
         # Runtime files are kept out of the checkout, including on Windows CI.
         self.original = os.getcwd()
         self.tmp = tempfile.TemporaryDirectory()

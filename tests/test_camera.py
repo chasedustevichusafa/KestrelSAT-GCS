@@ -3,6 +3,7 @@ from datetime import datetime, timezone, timedelta
 from pathlib import Path
 import io
 import gc
+import json
 import os
 import sys
 import tempfile
@@ -32,6 +33,7 @@ class CameraPort(SatellitePort):
         self.job = None
         self.captures = 0
         self.camera_support = self.camera_ready = True
+        self.diagnostics_support = True
         self.hold = False
         self.resolutions = (1 << 14)-1
 
@@ -42,10 +44,18 @@ class CameraPort(SatellitePort):
         request, command = parsed
         op = command[0]
         if op == 'CAPS':
-            response = ['CAPS', 'UPLOAD1', 'MANAGE1', *(['CAMERA1'] if self.camera_support else []), '128']
+            response = ['CAPS', 'UPLOAD1', 'MANAGE1', *(['CAMERA1'] if self.camera_support else []),
+                        *(['CAMDIAG1'] if self.diagnostics_support else []), '128']
         elif op == 'CAMINFO':
             response = ['CAMERA', '5MP', str(self.resolutions if self.camera_ready else 0),
                         'NONE' if self.camera_ready else 'CAMERA_NOT_FOUND', 'SD_READY']
+        elif op == 'CAMDIAG':
+            if not self.job or command[1] != self.job['job']:
+                response = ['ERR', 'UNKNOWN_JOB']
+            else:
+                content = self.job['data']
+                response = ['CAMDETAIL', command[1], len(content), len(content), len(content), 0,
+                            content[:8].hex(), content[-8:].hex(), 'NONE']
         elif op in ('CAPTURE', 'CAMSTATUS'):
             job = command[1]
             if op == 'CAPTURE':
@@ -123,6 +133,27 @@ class ClientTests(unittest.TestCase):
             client._job(['CAMJOB', pending['job'], 'SAVED', '5', '4', '00000000', pending['path'].encode().hex(), 'NONE'], pending['job'], pending['path'])
         with self.assertRaises(rf.RemoteError):
             client._job(['CAMJOB', pending['job'], 'SAVED', '4', '4', '00000000', '/wrong.jpg'.encode().hex(), 'NONE'], pending['job'], pending['path'])
+
+    def test_optional_capture_diagnostics_validate_and_preserve_results(self):
+        rows = []
+        port = CameraPort()
+        client = cf.CameraClient(port, timeout=.1, diagnostic=lambda event, **data: rows.append((event, data)))
+        pending = cf.new_capture(0)
+        result = client.wait_capture(pending, client.start_capture(pending), poll_interval=.001)
+        detail = client.capture_diagnostics(pending['job'])
+        self.assertEqual(detail['saved_bytes'], result['total'])
+        self.assertTrue(detail['first_hex'].startswith('ffd8'))
+        self.assertTrue(any(event == 'camera_detail' for event, _ in rows))
+        port.diagnostics_support = False
+        self.assertIsNone(client.capture_diagnostics(pending['job']))
+        # Older firmware remains usable, and bad diagnostic metadata does not
+        # erase the already verified SAVED outcome.
+        self.assertEqual(client.capture_status(pending['job'], pending['path'])['state'], 'SAVED')
+        port.diagnostics_support = True
+        bad = ['CAMDETAIL', pending['job'], '10', '11', '8', '0', '0'*16, '0'*16, 'NONE']
+        with patch.object(client, 'request', return_value=bad), patch.object(client, 'capabilities', return_value={'CAMDIAG1'}):
+            self.assertIsNone(client.capture_diagnostics(pending['job']))
+        self.assertTrue(any(event == 'camera_detail_unavailable' for event, _ in rows))
 
     def test_view_limit_uses_open_metadata_and_closes_oversized_session(self):
         class LargePort(CameraPort):
@@ -224,6 +255,10 @@ class TabTests(unittest.TestCase):
         self.app.transfer_recorder.stop_recording()
         self.assertEqual(recording.snapshot()['operation_count'], 1)
         self.assertTrue(any(event['event'] == 'camera_saved' for event in recording.events))
+        diagnostic_rows = [json.loads(line) for path in Path('transfer_diagnostics').glob('*.jsonl')
+                           for line in path.read_text().splitlines()]
+        self.assertTrue(any(row['event'] == 'camera_info' for row in diagnostic_rows))
+        self.assertTrue(any(row['event'] == 'camera_detail' for row in diagnostic_rows))
 
     def test_disconnect_and_check_recover_without_new_capture(self):
         self.tab.refresh(); self.finish()

@@ -90,6 +90,28 @@ class CameraClient(Client):
             raise RemoteError('Invalid capture job')
         return self._job(self.request('CAMSTATUS', job, expected={'CAMJOB'}), job, path)
 
+    def capture_diagnostics(self, job):
+        """Optional metadata; its failure must not replace a known capture result."""
+        try:
+            if not re.fullmatch('[0-9a-f]{8}', job):
+                raise RemoteError('Invalid capture job')
+            if 'CAMDIAG1' not in self.capabilities():
+                return None
+            reply = self.request('CAMDIAG', job, expected={'CAMDETAIL'})
+            if (len(reply) != 9 or reply[1] != job or
+                    any(not re.fullmatch('[a-fA-F0-9]{16}', text) for text in reply[6:8])):
+                raise RemoteError('Invalid camera diagnostics')
+            fifo, read, saved, prefix = [unsigned(text, MAX_IMAGE) for text in reply[2:6]]
+            if read > fifo or saved > read or prefix > read:
+                raise RemoteError('Invalid camera byte counts')
+            detail = dict(job=job, fifo_bytes=fifo, read_bytes=read, saved_bytes=saved,
+                          prefix_bytes=prefix, first_hex=reply[6], last_hex=reply[7], error=reply[8])
+            self._record('camera_detail', **detail)
+            return detail
+        except Exception as exc:
+            self._record('camera_detail_unavailable', error=str(exc))
+            return None
+
     def start_capture(self, pending):
         pending = pending_capture(pending)
         if pending is None:

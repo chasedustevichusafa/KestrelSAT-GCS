@@ -59,6 +59,13 @@ and radio settings remain compatible.
 
 ## Camera capture (2026-10-21)
 
+**2026-10-22 follow-up:** Camera-2 firmware extracts JPEG frames from the camera
+FIFO, uses the vendor's SD-example read method, and can retry failed detection
+through Refresh images. The GCS records FIFO/image byte counts and boundary
+samples for failed captures. An optional GPIO27 camera-CS firmware environment
+supports investigating GPIO12 boot/flash interference. See the
+[hardware report, fixes and upload procedure](docs/camera.md#camera-test-follow-up--2026-10-22).
+
 Use matching GCS and Lab 8 artifacts on `feature/remote-camera`. Open **Camera →
 Refresh images**, choose a supported resolution and **Capture image**. Once SD
 verification finishes, use **View** to download and display the saved JPEG or

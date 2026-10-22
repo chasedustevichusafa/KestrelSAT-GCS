@@ -10,7 +10,8 @@ live preview or automatic image stream.
 1. Extract the firmware ZIP and open `KestrelSAT-Lab8` in PlatformIO. Upload
    `esp32thing_plus_115200` for the current 115200 radios. The default
    `esp32thing_plus` environment remains 9600. Confirm USB startup marker
-   `KFS1 camera-1`, followed by camera sensor/model/status output.
+   `KFS1 camera-2`, followed by camera sensor/model/status output. For upload
+   failures with the camera attached, follow the GPIO12 procedure below.
 2. Keep existing board, wiring, SD clock and radio configuration. The satellite
    XBee remains AP=0. Ground AP=1 pairs with GCS **XBee API (AP=1)**, or ground
    AP=0 with GCS **Transparent**. Legacy AO=2 indicators remain supported.
@@ -80,7 +81,10 @@ are explicit errors. The camera's register waits are bounded; JPEG capture polls
 cooperatively and times out after 15 seconds without completion. The whole job
 has a 120-second limit. File reads/writes/deletion are blocked while a capture is
 active; status and abort queries remain available. Camera faults leave the normal
-file-service firmware running. Check wiring/power and reset to retry initialization.
+file-service firmware running. Check wiring/power, then **Refresh images** to retry
+failed initialization (at most once per three seconds, with no active file/camera
+job). No reconnect/reset is required for late camera power. A ready camera is not
+reset by Refresh. Sensor initialization has a four-second wait budget.
 
 ## Hardware and implementation
 
@@ -92,9 +96,15 @@ camera adapter switches SPI transactions at 1 MHz, releases camera CS before eac
 SD write and preserves the existing SD clock. Its operation table replaces the
 vendor's indefinite sensor/capture waits; no preview thread is started.
 
-The portable capture job saves 256-byte FIFO blocks, syncs/closes the complete
-temporary file, checks length and JPEG start/end markers, then reads all bytes
-back and compares CRC32 before publication. SD operations have bounded retries at
+The portable capture job reads up to 256 FIFO bytes per loop. Like the vendor
+`capture2SD` example, it uses independent `readByte` operations, avoiding burst
+resumption/dummy-byte state across SD transactions. A streaming JPEG framer finds
+SOI, follows segment lengths through the scan to EOI, and excludes bytes outside
+that frame. Split markers and embedded thumbnail markers are handled. The
+firmware syncs/closes the extracted JPEG and reads all bytes back to compare its
+CRC32 before publication. Saved size/CRC describe the JPEG rather than the FIFO.
+Single-byte camera reads trade speed for simpler shared-bus behavior; saving
+large resolutions can take longer. SD operations have bounded retries at
 the same offset; failed writes never reread/advance the camera FIFO for retries.
 Full JPEG decoding happens on the GCS when View is requested. No full image buffer
 is allocated on the satellite.
@@ -107,6 +117,7 @@ KFS1 adds `CAMERA1` to CAPS, retaining HELLO version 1 and 128-byte file chunks:
 | `CAPTURE|job_hex|mode_index|path_hex` | `CAMJOB|job_hex|state|done|total|crc32|path_hex|error` |
 | `CAMSTATUS|job_hex` | Same job reply, or UNKNOWN |
 | `CAMABORT|job_hex` | Same job reply after best-effort cancellation; an already saved job remains SAVED |
+| `CAMDIAG|job_hex` (optional `CAMDIAG1` capability) | `CAMDETAIL|job_hex|fifo_bytes|read_bytes|saved_bytes|prefix_bytes|first_8_bytes_hex|last_8_bytes_hex|error` |
 
 The GCS exposes Stop waiting and Check capture; CAMABORT is a protocol operation,
 not an automatic action on disconnect. Capture paths are restricted to a single
@@ -131,11 +142,63 @@ controls and legacy XBee API framing to cover capture, disconnect recovery, view
 zoom/close, rename/delete, size limits and transfer statistics. Compilation and
 simulation do not establish physical camera operation.
 
-All 13 GCS suites (including 10 camera tests) and 30 firmware host/PTY tests
-passed. Both 9600 and 115200 firmware variants compile.
+The initial camera build passed all 13 GCS suites and 30 firmware host/PTY tests.
+Camera-2 also passes all 13 GCS suites (including 11 camera tests) and adds
+real padded-JPEG, split-marker, thumbnail and malformed FIFO cases,
+plus a fake-bus check of the production adapter with the unchanged vendor driver.
+All 33 firmware host/PTY tests pass; both baud variants and the optional GPIO27
+build compile. These establish software behavior, not electrical reliability.
 
 On hardware, begin at 320×240 or 640×480: capture, View, check decoded dimensions,
 Download and compare copies, then rename/delete a disposable image. Test a higher
 supported resolution, repeated captures, Stop waiting/Check capture and reconnect.
 Confirm existing upload/download/statistics behavior with the new firmware. Save
 USB camera/SD output and GCS diagnostics for any failure.
+
+## Camera test follow-up — 2026-10-22
+
+The first hardware report showed an API-mode 96×96 capture reaching 1,840/1,840
+bytes, then `INVALID_JPEG`, with no retries, timeouts or malformed radio frames.
+The original code required the whole FIFO to start/end at the JPEG boundaries.
+The vendor's [capture2SD example](https://github.com/ArduCAM/Arducam_Mega/blob/main/examples/ArduinoUNO/capture2SD/capture2SD.ino)
+instead finds SOI and stops at EOI. Camera-2 implements streaming framing and
+uses that example's single-byte read primitive. This addresses a confirmed
+software limitation; the original log has no image bytes, so it does not prove
+which padding/readout condition occurred on this camera. Corrupt or incomplete
+frames still fail, are cleaned up and are never published as successful images.
+
+New captures record `camera_detail` metadata in the GCS JSONL: FIFO/read/saved
+counts, skipped prefix, first/last eight FIFO bytes and terminal error. Refresh
+also records model/mode mask/status. These bounded byte samples help distinguish
+framing, missing markers and readout faults without recording whole images.
+Diagnostics are optional and cannot replace a known capture result; older camera
+firmware without CAMDIAG1 remains usable.
+
+The same report described flash verification MD5 mismatches with the camera
+attached and intermittent detection. Lab camera CS is **GPIO12**. On the actual
+ESP32 board this is MTDI, a boot strap that can select **1.8 V flash power** when
+held high at reset, although the board uses 3.3 V flash.
+[Espressif documents the resulting flash/boot failure](https://docs.espressif.com/projects/esptool/en/latest/esp32/advanced-topics/boot-mode-selection.html).
+This is a plausible electrical cause, not established by the MD5 error alone;
+power instability remains possible. Firmware cannot set the pin before the ROM
+samples it. Board configuration and flash verification remain unchanged.
+
+For a durable GPIO12 comparison, with **all power disconnected**, move only the
+camera **CS** lead from GPIO12 to **GPIO27**, after confirming GPIO27 is unused
+on your hardware. Upload **`esp32thing_plus_115200_camera_cs27`**. This optional
+environment retains the working board, radio rate, SD and SPI pins, and prints
+`camera_cs=27`. Existing environments still use GPIO12. Firmware and physical CS
+wiring must match. If flashing still fails, disconnect the camera while unpowered,
+upload, then power down again before restoring it. Do not hot-plug camera wiring.
+Do not burn flash-voltage eFuses or disable MD5 verification as a workaround.
+
+Keep the camera's existing rated supply connection; verify its exact model and
+power wiring before changing voltage. A reported 5 V connection alone does not
+establish power stability. If GPIO27 does not resolve upload/boot failures, collect
+startup/reset output and check the shared supply, ground, cable and current
+capacity. Firmware does not repair a power fault.
+
+For the next hardware test, retain radio/AP settings, use matching camera-2 GCS
+and firmware, and start at 320×240. Capture, View and confirm decoded dimensions,
+then repeat at 96×96 and 640×480. If detection fails, wait three seconds and Refresh
+images. Save the new JSONL on failure; it should now contain `camera_detail`.
