@@ -1,6 +1,6 @@
 # -*- mode: python ; coding: utf-8 -*-
 
-from PyInstaller.utils.hooks import collect_data_files
+from PyInstaller.utils.hooks import collect_data_files, copy_metadata
 
 # serial_gui.py stays the entry point, so PyInstaller follows its imports into
 # the kestrelsat package and this spec needs no change when modules move.
@@ -14,7 +14,7 @@ a = Analysis(
         # The GPL requires the licence travel with the binary, so ship it
         # inside the exe rather than relying on the source repo.
         ('LICENSE', '.'),
-    ] + collect_data_files('pyqtgraph'),
+    ] + collect_data_files('pyqtgraph') + copy_metadata('Pillow'),
     hiddenimports=[
         'serial.tools.list_ports',
         'PyQt5.QtCore',
