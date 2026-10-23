@@ -398,7 +398,7 @@ class Client:
             raise failure
         raise RemoteError('Upload did not complete')
 
-    def download(self, path, destination):
+    def download(self, path, destination, max_bytes=None):
         encoded = path_hex(path)
         self.hello()
         token = None
@@ -413,6 +413,8 @@ class Client:
             except ValueError as exc:
                 raise RemoteError('Invalid file session') from exc
             token, total = reply[1], unsigned(reply[2])
+            if max_bytes is not None and total > max_bytes:
+                raise RemoteError('File exceeds the viewing size limit; use Download to save it')
             destination = Path(destination)
             with tempfile.NamedTemporaryFile(prefix='.kestrelsat-', suffix='.part',
                                              dir=destination.parent, delete=False) as output:

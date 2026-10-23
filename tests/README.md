@@ -58,3 +58,13 @@ transfer cancellation, full-CSV combining, memory-limited graph history, overvie
 decimation, logging failures and shutdown. Real Tk tests cover the combine worker,
 API browse/download event integration, themes and graph lifecycle, measurement/
 summary exports and all three PNG targets with restoration of the previous zoom.
+
+## Camera tests — 2026-10-21
+
+`test_camera.py` covers local timestamp/offset naming, supported modes, pending
+job validation, capture/status parsing, checked on-demand JPEG downloads, corrupted
+and oversized image handling, real Tk capture/view/zoom/close/rename/delete,
+disconnect recovery without recapture, statistics, missing/old firmware and legacy
+API frames with one raw reader. Each Tk case collects prior test interpreters on
+the main thread before starting new workers. Lab 8's host/PTY suite separately
+exercises the actual portable capture job and injected camera/SD failures.

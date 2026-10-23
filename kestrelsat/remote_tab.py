@@ -11,10 +11,12 @@ from .transfer_diagnostics import Capture
 
 
 class RemoteFilesTab:
-    def __init__(self, app):
+    def __init__(self, app, title='Remote Files', event_kind='remote_files'):
         self.app = app
+        self.event_kind = event_kind
+        self.title = title
         self.frame = ttk.Frame(app.notebook, padding=10)
-        app.notebook.add(self.frame, text='Remote Files')
+        app.notebook.add(self.frame, text=title)
         self.directory = '/'
         self.entries = {}
         self.busy = False
@@ -115,7 +117,7 @@ class RemoteFilesTab:
             self.status.set('Connect to the XBee serial port on the Connection tab first.')
             return False
         if self.app.test_mode:
-            self.status.set('Remote Files requires Lab 8 firmware and a real serial connection; TEST MODE supplies telemetry only.')
+            self.status.set(self.title+' requires Lab 8 firmware and a real serial connection; TEST MODE supplies telemetry only.')
             return False
         return True
 
@@ -267,7 +269,7 @@ class RemoteFilesTab:
         port = self.app.serial_connection
         if hasattr(port, 'set_transfer_cancel'):
             port.set_transfer_cancel(cancel)
-        stats = self.app.start_transfer_statistics('KFS1', action, path) if action in ('download', 'upload') else None
+        stats = self.app.start_transfer_statistics('KFS1', 'download' if action == 'view' else action, path) if action in ('download', 'upload', 'view') else None
         worker = threading.Thread(target=self._worker,
                                   args=(generation, port, cancel, action, path, destination, stats), daemon=True)
         self.app._transfer_thread = worker
@@ -275,7 +277,7 @@ class RemoteFilesTab:
 
     def _worker(self, generation, port, cancel, action, path, destination, stats):
         def post(event, **info):
-            self.app._post_rx(('remote_files', dict(info, event=event, generation=generation)))
+            self.app._post_rx((self.event_kind, dict(info, event=event, generation=generation)))
         last_progress = 0
 
         def progress(**info):
@@ -312,9 +314,17 @@ class RemoteFilesTab:
                             result['upload_supported'] = False
                             result['manage_supported'] = False
                             result['capability_error'] = str(exc)
-                    elif action == 'download':
-                        saved = client.download(path, destination)
+                    elif action in ('download', 'view'):
+                        saved = client.download(path, destination, max_bytes=8*1024*1024 if action == 'view' else None)
                         result = dict(event='downloaded', destination=str(saved))
+                        if action == 'view':
+                            if stats is not None:
+                                stats.finish('completed')
+                            try:
+                                from .image_viewer import decode_image
+                                result.update(event='viewed', image=decode_image(saved))
+                            except Exception as exc:
+                                result['view_error'] = str(exc)
                     else:
                         if action == 'upload':
                             client.upload(destination, path)
@@ -350,7 +360,7 @@ class RemoteFilesTab:
             if hasattr(port, 'set_transfer_cancel'):
                 port.set_transfer_cancel(None)
             if stats is not None:
-                stats.finish('completed' if result['event'] in ('downloaded', 'uploaded') else
+                stats.finish('completed' if result['event'] in ('downloaded', 'uploaded', 'viewed') else
                              'uncertain' if result['event'] == 'uncertain' else
                              'cancelled' if result['event'] == 'cancelled' else 'failed')
             try:

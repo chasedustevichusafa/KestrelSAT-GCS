@@ -27,6 +27,8 @@ interactive rendering of live data.
   `sz`/`rz`, TeraTerm, minicom and other standard ZMODEM tools
 - **Remote SD Files**: Browse satellite folders and upload/download files over XBee with
   progress, cancellation, retries, and whole-file checksum verification; rename or delete SD files
+- **Camera**: Remotely capture a JPEG at a supported resolution, save it on SD,
+  then view/download, rename or delete it. Filenames use local request time and resolution.
 - **Status Bar**: Connection status and samples-per-second
 - **Resize-safe**: a minimum window size plus scrollable panels, so no control
   can be pushed out of reach; Send Data and the monitor controls always stay visible
@@ -55,12 +57,39 @@ See [recording instructions, data definitions and limits](docs/multi-operation-r
 Use the Windows artifact on `feature/multi-operation-recordings`; existing firmware
 and radio settings remain compatible.
 
+## Camera capture (2026-10-21)
+
+**2026-10-22 hardware confirmation:** The owner confirmed camera capture and
+GPIO27 operation and reported a working stopping point. The confirmed setup uses
+`esp32thing_plus_115200_camera_cs27`, 115200-baud radios, satellite AP=0,
+ground AP=1/GCS API mode, and unicast destinations on both radios. The same-image
+unicast downloads completed in 22.407 s with RSSI off and 22.411 s with it on,
+with zero protocol timeouts/retries in either run. RSSI can remain enabled.
+See [the measured results and radio setup](docs/camera.md#confirmed-hardware-setup-and-transfer-results--2026-10-22).
+
+**2026-10-22 follow-up:** Camera-2 firmware extracts JPEG frames from the camera
+FIFO, uses the vendor's SD-example read method, and can retry failed detection
+through Refresh images. The GCS records FIFO/image byte counts and boundary
+samples for failed captures. An optional GPIO27 camera-CS firmware environment
+supports investigating GPIO12 boot/flash interference. See the
+[hardware report, fixes and upload procedure](docs/camera.md#camera-test-follow-up--2026-10-22).
+
+Use matching GCS and Lab 8 artifacts from `main` after merge, or
+`feature/remote-camera` while testing this PR. Open **Camera →
+Refresh images**, choose a supported resolution and **Capture image**. Once SD
+verification finishes, use **View** to download and display the saved JPEG or
+**Download...**, **Rename...** and **Delete...** to manage it. No live preview is
+started. Keep the confirmed wiring and radio settings; upload
+`esp32thing_plus_115200_camera_cs27` for camera CS on GPIO27. The
+`esp32thing_plus_115200` environment retains the original GPIO12 wiring.
+See [camera instructions and recovery](docs/camera.md).
+
 ## Requirements
 
 - Python 3.10 or newer (required by the pinned `pyqtgraph`)
 - tkinter (bundled with the standard Windows and macOS Python installers; on Debian or
   Ubuntu install `python3-tk`)
-- The packages in `requirements.txt`: `pyserial`, `pyqtgraph`, `PyQt5`
+- The packages in `requirements.txt`: `pyserial`, `pyqtgraph`, `PyQt5`, and `Pillow`
 
 PyQtGraph and PyQt5 are only needed for the plot window. If they are missing the app still
 starts and the serial monitor works; plotting is disabled with a warning on the console.
@@ -71,9 +100,9 @@ The **Remote Files** tab browses the satellite SD card and transfers files over
 the existing XBee connection. It requires the matching `Astro331_Lab8_Code`
 firmware and supports verified uploads/downloads, progress, retries, and cancellation.
 See [setup, Windows executable download, and hardware test instructions](docs/remote-files.md).
-Live camera preview is a later milestone.
+The new Camera tab adds single-image capture and on-demand viewing; see [camera setup](docs/camera.md). Live streaming remains outside this feature.
 
-Use the [matching Lab 8 firmware](https://github.com/chasedustevichusafa/Lab-8-Wireless-Image-Capture-and-Transmission/tree/feature/remote-file-management/Astro-331-2026-Fall/Astro331_Lab8_Code).
+Use the [matching Lab 8 firmware](https://github.com/chasedustevichusafa/Lab-8-Wireless-Image-Capture-and-Transmission/tree/feature/remote-camera/Astro-331-2026-Fall/Astro331_Lab8_Code).
 Connect to the ground XBee COM port at **9600 baud, 8N1** for the default firmware,
 or **115200 baud, 8N1** with the matching `esp32thing_plus_115200` firmware and
 radio UART settings, then open
@@ -111,7 +140,7 @@ RSSI polling, and the Windows executable built successfully. Physical testing
 of the corrected API/RSSI connection is still pending.
 
 Download feature builds from [Windows test build Actions](https://github.com/chasedustevichusafa/KestrelSAT-GCS/actions/workflows/build-windows.yml).
-Choose a successful run on `feature/multi-operation-recordings`, download its Windows
+Choose a successful run on `feature/remote-camera`, download its Windows
 artifact while signed into GitHub, and extract it before launching the executable.
 
 ### File-transfer stability investigation (2026-10-21)
@@ -133,6 +162,11 @@ hardware reliability target remain to be established.
 Follow the [diagnostic procedure and hardware acceptance checklist](docs/file-transfer-stability.md).
 
 ### Dated changes
+
+- **2026-10-21 — Remote still-image capture:** Added the Camera tab, detected
+  resolution choices, local-time filenames, SD capture status/recovery and static
+  JPEG viewing. Reuses verified downloads, rename/delete and existing statistics.
+  Matching Lab 8 firmware is required; physical camera testing is pending.
 
 - **2026-10-21 — Multi-operation statistics:** Added named continuous recordings,
   original-time combining of finished transfers, partial-capture markers, durable

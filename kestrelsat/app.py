@@ -65,6 +65,7 @@ from . import scaling
 from . import __version__
 from . import zmodem
 from .remote_tab import RemoteFilesTab
+from .camera_tab import CameraTab
 from .stats_tab import StatisticsTab
 from .transfer_stats import Recorder
 from .xbee_api import ApiSerial, MeteredSerial
@@ -287,6 +288,7 @@ class SerialGUI:
         self.create_notepad_content()
 
         self.remote_files = RemoteFilesTab(self)
+        self.camera = CameraTab(self)
         self.transfer_stats = StatisticsTab(self)
 
         # Plot tabs, plus the '+' that adds another one. Built last so the
@@ -1187,6 +1189,7 @@ class SerialGUI:
         if self._transfer_thread is not None and self._transfer_thread.is_alive():
             self._transfer_thread.join(timeout=2.0)
         self.remote_files.invalidate()
+        self.camera.invalidate()
         self.radio_mode_combo.configure(state='readonly')
         self.serial_buffer = ""  # Clear buffer on disconnect
         self.first_line_received = False  # Reset first line flag
@@ -1300,6 +1303,8 @@ class SerialGUI:
                 self.log_message(payload[0], payload[1])
             elif kind == 'remote_files':
                 self.remote_files.on_event(payload)
+            elif kind == 'camera':
+                self.camera.on_event(payload)
             elif kind == 'stats_combined':
                 self.transfer_stats.on_combined(payload)
             elif kind == 'zmodem':
@@ -2018,6 +2023,7 @@ class SerialGUI:
         # Tear the Qt side down before the Tk root. Leaving a live QMainWindow
         # referenced from self.plot_widget/plot_curves while the interpreter
         # shuts down is a known PyQt5 segfault-on-exit ordering hazard.
+        self.camera.close()
         self.transfer_stats.close()
         self.transfer_recorder.stop_recording('application_closed')
         if self.transfer_recorder.active:
