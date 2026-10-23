@@ -59,6 +59,14 @@ and radio settings remain compatible.
 
 ## Camera capture (2026-10-21)
 
+**2026-10-22 hardware confirmation:** The owner confirmed camera capture and
+GPIO27 operation and reported a working stopping point. The confirmed setup uses
+`esp32thing_plus_115200_camera_cs27`, 115200-baud radios, satellite AP=0,
+ground AP=1/GCS API mode, and unicast destinations on both radios. The same-image
+unicast downloads completed in 22.407 s with RSSI off and 22.411 s with it on,
+with zero protocol timeouts/retries in either run. RSSI can remain enabled.
+See [the measured results and radio setup](docs/camera.md#confirmed-hardware-setup-and-transfer-results--2026-10-22).
+
 **2026-10-22 follow-up:** Camera-2 firmware extracts JPEG frames from the camera
 FIFO, uses the vendor's SD-example read method, and can retry failed detection
 through Refresh images. The GCS records FIFO/image byte counts and boundary
@@ -66,12 +74,15 @@ samples for failed captures. An optional GPIO27 camera-CS firmware environment
 supports investigating GPIO12 boot/flash interference. See the
 [hardware report, fixes and upload procedure](docs/camera.md#camera-test-follow-up--2026-10-22).
 
-Use matching GCS and Lab 8 artifacts on `feature/remote-camera`. Open **Camera →
+Use matching GCS and Lab 8 artifacts from `main` after merge, or
+`feature/remote-camera` while testing this PR. Open **Camera →
 Refresh images**, choose a supported resolution and **Capture image**. Once SD
 verification finishes, use **View** to download and display the saved JPEG or
 **Download...**, **Rename...** and **Delete...** to manage it. No live preview is
-started. Keep existing baud/AP settings; upload `esp32thing_plus_115200` firmware
-for the current 115200 radios. See [camera instructions and recovery](docs/camera.md).
+started. Keep the confirmed wiring and radio settings; upload
+`esp32thing_plus_115200_camera_cs27` for camera CS on GPIO27. The
+`esp32thing_plus_115200` environment retains the original GPIO12 wiring.
+See [camera instructions and recovery](docs/camera.md).
 
 ## Requirements
 

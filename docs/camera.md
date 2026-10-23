@@ -1,15 +1,17 @@
 # Remote still-image capture — 2026-10-21
 
-Use matching `feature/remote-camera` builds of the GCS and Lab 8 firmware. The
-owner confirmed that the preceding file-management and statistics builds work;
-physical camera/SD integration testing is pending for this feature. There is no
-live preview or automatic image stream.
+Use matching GCS and Lab 8 firmware builds from `main` after merge, or
+`feature/remote-camera` while testing this PR. On 2026-10-22 the owner confirmed
+camera operation with GPIO27 and unicast radios and reported no remaining issues
+at the agreed stopping point. Measured transfer results and their limits are
+documented below. There is no live preview or automatic image stream.
 
 ## First test
 
 1. Extract the firmware ZIP and open `KestrelSAT-Lab8` in PlatformIO. Upload
-   `esp32thing_plus_115200` for the current 115200 radios. The default
-   `esp32thing_plus` environment remains 9600. Confirm USB startup marker
+   `esp32thing_plus_115200_camera_cs27` for the confirmed GPIO27/115200 setup.
+   `esp32thing_plus_115200` retains GPIO12; default `esp32thing_plus` retains
+   GPIO12/9600. Firmware and physical CS wiring must match. Confirm USB startup marker
    `KFS1 camera-2`, followed by camera sensor/model/status output. For upload
    failures with the camera attached, follow the GPIO12 procedure below.
 2. Keep existing board, wiring, SD clock and radio configuration. The satellite
@@ -202,3 +204,50 @@ For the next hardware test, retain radio/AP settings, use matching camera-2 GCS
 and firmware, and start at 320×240. Capture, View and confirm decoded dimensions,
 then repeat at 96×96 and 640×480. If detection fails, wait three seconds and Refresh
 images. Save the new JSONL on failure; it should now contain `camera_detail`.
+
+## Confirmed hardware setup and transfer results — 2026-10-22
+
+The owner confirmed that camera-2 captures work, GPIO27 works well, and the
+system reached a working stopping point. The confirmed configuration is:
+
+- Camera CS on GPIO27, firmware `esp32thing_plus_115200_camera_cs27`.
+- Both radio UARTs at 115200; satellite AP=0, ground AP=1 with GCS API mode.
+- Both radios use unicast: ground DH/DL are the satellite SH/SL, and satellite
+  DH/DL are the ground SH/SL. The supplied lab profile uses DH=0/DL=FFFF broadcast;
+  it is a course reference rather than the confirmed transfer configuration.
+- MAC acknowledgments enabled (MM=0 in the lab radio firmware); legacy AO=2
+  receive indicators remain supported. RSSI polling can remain enabled.
+
+Save both XCTU profiles before changing destinations, copy the peer's hexadecimal
+SH/SL exactly, write both radios, and reconnect the GCS so it reads the new
+destination. Retain existing network settings. Firmware does not configure radios.
+
+The following user-supplied JSONL logs downloaded the same saved 640×480 JPEG,
+`20261022T195938-0600_640x480_da02b0a6.jpg`, with unicast addressing:
+
+| Log | RSSI polling | Operation duration | Protocol timeouts/retries | Outcome |
+| --- | --- | --- | --- | --- |
+| `kfs-20261023T021016Z-o38jaxio.jsonl` | Off | 22.407 s | 0 / 0 | Downloaded, checksum verified |
+| `kfs-20261023T021158Z-r41bqc_5.jsonl` | On | 22.411 s | 0 / 0 | Downloaded, checksum verified |
+
+Both logs represent 260 sequential READ chunks with steady progress. Polling
+returned a final RSSI of -21 dBm; that is an endpoint reading, not a session
+average. One rejected protocol line was counted during OPEN in the polling-on
+run, with no timeout/retry or measurable slowdown. Durations include setup and
+completion; successful READ timings are recorded as periodic checkpoints rather
+than every request. UTC filenames fall on October 23; the local test date was
+October 22.
+
+Earlier broadcast examples took 26.465 s with polling off (one timeout/retry)
+and 38.615 s with polling on (four timeouts/retries), using different 640×480
+images. Their difference mostly consisted of four-second reply waits. The
+same-image unicast pair supports broadcast delivery as a contributor to the
+earlier pauses; it does not establish that RSSI polling caused them.
+
+The earlier 83,996-byte image failed with SD `READ_FAILED` at offset 34,816 after
+three attempts. Its physical cause was not established, and local SDCHECK results
+were not supplied. The owner subsequently reported all seemed fixed, but these
+two unicast downloads are not a twenty-transfer reliability study or proof that
+every large-image SD failure is eliminated. Keep USB/JSONL diagnostics and the
+existing SDCHECK procedure available if an SD error recurs. No SD-clock reduction
+was made as part of this handoff; the configured default remains 25 MHz.

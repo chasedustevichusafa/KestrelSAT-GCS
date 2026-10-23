@@ -6,6 +6,8 @@ on:
     branches: ['main', 'feature/remote-files', 'feature/transfer-statistics', 'fix/file-transfer-stability', 'feature/remote-upload', 'feature/remote-file-management', 'feature/multi-operation-recordings', 'feature/remote-camera']
   pull_request:
     paths:
+      - 'README.md'
+      - 'docs/**'
       - 'kestrelsat/**'
       - 'tests/**'
       - 'serial_gui.py'
