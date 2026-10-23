@@ -1,10 +1,24 @@
 """On-demand JPEG decoding and Tk viewing; never starts a camera stream."""
+
+# READING GUIDE - this viewer displays a downloaded local JPEG.
+# decode_image uses Pillow in the transfer worker and returns detached RGB image
+# data after loading; Tk objects must not be created there. render runs on the
+# main thread and creates ImageTk.PhotoImage with an explicit Tk owner.
+#
+# The decode limit bounds pixel memory; the file-download limit is checked by
+# the caller against actual OPEN metadata. Those are separate limits. Fit/zoom
+# never enlarge beyond original size, and a short redraw timer coalesces resize
+# bursts. close cancels that timer and releases Tk variables/images on Tk's
+# thread before destroying the window. The downloaded file remains on disk.
 from pathlib import Path
 import tkinter as tk
 from tkinter import ttk
 from . import scaling
 
 
+# Pillow decoding is potentially expensive and runs in the worker. load()
+# forces decoding while the source file is open; RGB conversion returns an
+# independent image for later GUI use. This routine creates no Tk resources.
 def decode_image(path):
     from PIL import Image
     with Image.open(path) as image:
@@ -64,6 +78,10 @@ class ImageViewer:
             self.window.after_cancel(self.timer)
         self.timer = self.window.after(80, self.render)
 
+    # Create/release PhotoImage only on Tk's thread and keep a Python reference
+    # in self.photo; losing that reference can blank a still-visible canvas image.
+    # Fit is bounded by original size, and rendering uses the decoded local copy,
+    # not another radio download or camera exposure.
     def render(self):
         if self.timer is not None:
             self.window.after_cancel(self.timer)

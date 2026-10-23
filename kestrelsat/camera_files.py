@@ -1,4 +1,19 @@
 """Single-shot camera jobs over the existing checked KFS1 transport."""
+
+# READING GUIDE - capture control is separate from image download.
+# CAPTURE asks the satellite to save a JPEG on its own SD card. CAMSTATUS polls
+# one job; it does not transport pixel data. View/Download later use the ordinary
+# file protocol. No preview stream or repeated automatic exposure is created.
+#
+# The ground computer supplies LOCAL request time plus UTC offset in filenames;
+# the satellite has no configured real-time clock. A random job suffix separates
+# requests with equal timestamps and allows retries to refer to the same capture.
+# The resolution index must match the vendor enum/bitmask, not a pixel count.
+#
+# The difficult case is an uncertain start reply: the exposure may already be
+# running or saved. Reuse the original job ID and query status instead of taking
+# another photo. UNKNOWN after reset/replacement asks the operator to inspect SD;
+# it is not permission to silently repeat a capture.
 from dataclasses import dataclass
 from datetime import datetime
 import re
@@ -30,6 +45,10 @@ class CameraInfo:
         return [index for index in range(len(RESOLUTIONS)) if self.mask & (1 << index)]
 
 
+# The timestamp marks the PC request, not measured shutter time. Its UTC
+# offset distinguishes repeated local times around daylight-saving changes.
+# The mode index is used on the wire; width/height are descriptive filename
+# fields. Preserve the returned job/path together for every retry/check.
 def new_capture(mode, now=None):
     if not isinstance(mode, int) or mode not in range(len(RESOLUTIONS)):
         raise RemoteError('Choose a supported resolution')
@@ -68,6 +87,10 @@ class CameraClient(Client):
             raise RemoteError('Invalid camera information')
         return CameraInfo(reply[1], unsigned(reply[2], (1 << len(RESOLUTIONS))-1), reply[3], reply[4] == 'SD_READY')
 
+    # Validate identity, state, path, byte counts and terminal outcome before
+    # showing success. An ERROR may report a rejected oversized FIFO length;
+    # SAVED has stricter useful-image size/count rules. UNKNOWN has no matching
+    # path to validate because the satellite no longer retains that job.
     def _job(self, reply, job, path):
         if (len(reply) != 8 or reply[0] != 'CAMJOB' or reply[1] != job or reply[2] not in STATES or
                 not re.fullmatch('[0-9a-fA-F]{8}', reply[5])):
@@ -112,6 +135,10 @@ class CameraClient(Client):
             self._record('camera_detail_unavailable', error=str(exc))
             return None
 
+    # A valid satellite rejection can be reported directly. An unconfirmed
+    # start may have succeeded: query CAMSTATUS for the SAME ID/path instead of
+    # generating a new CAPTURE. If even that query fails, expose uncertainty so
+    # the operator can reconnect/check rather than accidentally take two photos.
     def start_capture(self, pending):
         pending = pending_capture(pending)
         if pending is None:
@@ -129,6 +156,10 @@ class CameraClient(Client):
             except Exception:
                 raise OperationUncertain('Capture acceptance is unknown. Use Check capture; do not request another image yet.') from exc
 
+    # Waits are cancellation-aware on the GCS, but cancellation here means
+    # stop observing, not abort the onboard exposure. Status uses a finite total
+    # deadline. A terminal UNKNOWN is returned to the UI for operator inspection,
+    # not transformed into an automatic retry with a new image name.
     def wait_capture(self, pending, initial=None, poll_interval=1.0, timeout=150.0):
         job, path = pending['job'], pending['path']
         deadline = time.monotonic()+timeout

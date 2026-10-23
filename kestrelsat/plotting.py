@@ -23,6 +23,19 @@ They share only the incoming lines: each tab parses every line itself, with
 its own delimiter.
 """
 
+# READING GUIDE - telemetry plots are independent views of a shared stream.
+# Each PlotTab parses incoming lines with its own delimiter and keeps its own
+# channel objects, bounded sample buffers, sample counter, axes and Qt window.
+# Changing one plot's delimiter, pause state or colours must not mutate another.
+# The 64-channel cap prevents unbounded widget/curve creation from arbitrary names.
+#
+# Parsing and redraw have separate rates. Samples enter buffers as lines arrive;
+# Qt curve updates are throttled to about 30 FPS instead of redrawing every sample.
+# A paused plot and a disconnected serial port are different states. Legends and
+# curves must be rebuilt/removed together when a channel changes or is cleared.
+# Tk controls and Qt graphs share the application's GUI-thread event pumping;
+# window close/destroy paths must cancel scheduled work and release curve references.
+
 import itertools
 import time
 import tkinter as tk
@@ -664,6 +677,10 @@ class PlotTab:
             except Exception:
                 pass
 
+    # This plot applies its own delimiter to one complete telemetry line. A token
+    # may be name:value or an unnamed numeric column (Ch1, Ch2, ...). Invalid
+    # numeric tokens are skipped; the plot sample counter increments once per
+    # line that yielded data, not once per channel or once per serial read.
     def parse_plot_data(self, raw_data: str):
         """Parse incoming data for plotting"""
         try:
@@ -706,6 +723,10 @@ class PlotTab:
                     f"Error parsing data for plotting: {e}. Check the delimiter setting. "
                     "Further parse errors will not be reported.", "ERROR")
 
+    # Channel state and bounded sample queues belong to THIS plot instance.
+    # New names create controls/curves only within the channel cap. Repeated
+    # names update their existing channel. Channel keys are data identity; a
+    # custom displayed label must not rename or merge the underlying buffers.
     def update_plot_channels(self, new_data: Dict[str, float], sample_number: int):
         """Update plot data structures with new channel data"""
         for channel_name, value in new_data.items():
@@ -867,6 +888,9 @@ class PlotTab:
         
         self.schedule_plot_update()  # Use throttled update
 
+    # Coalesce data-driven redraw requests rather than creating one timer per
+    # sample. Reception/parsing can be much faster than useful display redraws.
+    # A pending GUI callback must be cancelled when the owning plot is destroyed.
     def schedule_plot_update(self):
         """Schedule a throttled plot update to improve performance"""
         # Called once per received line, so bail before doing any work when
@@ -1027,6 +1051,10 @@ class PlotTab:
             # Update plot with accumulated data when resuming
             self.schedule_plot_update()  # Use throttled update
 
+    # Take the selected sample-number/channel X values and visible Y curves
+    # from this plot's buffers. Drawing is a view of stored data, not the source
+    # of telemetry or transfer measurements. An absent Qt window is different
+    # from empty channel buffers and should not create another data source.
     def update_plot_display(self):
         """Push the current buffers onto the plot curves.
 
@@ -1248,6 +1276,10 @@ class PlotTab:
             self._drop_curves()
             self._status(f"Error creating plot window: {str(e)}")
 
+    # Clear channel controls, curves and legend references as one lifecycle
+    # operation. Leaving a stale Qt curve/legend entry while deleting only its
+    # Python channel would make later redraws misleading or leak old resources.
+    # Another PlotTab owns different state and must remain unaffected.
     def clear_plot_data(self):
         """Discard all channels: their data, per-channel settings, and UI rows.
 

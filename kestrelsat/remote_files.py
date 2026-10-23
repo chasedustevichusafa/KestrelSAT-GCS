@@ -3,6 +3,23 @@
 The same framed protocol is implemented in Lab 8's file_service.h. Serial reads
 must be exclusively owned by this client for the duration of an operation.
 """
+
+# READING GUIDE - ground half of the KFS1 file protocol.
+# The satellite implements the same contract in Lab 8 include/file_service.h.
+# This module has no widgets: a tab worker grants it exclusive payload-stream
+# ownership, then reports dictionaries through progress/diagnostic callbacks.
+#
+# There are two framing layers in API mode. xbee_api.py consumes raw radio API
+# frames and exposes their RF payload bytes as a serial-like stream. encode/decode
+# here frame KFS commands INSIDE that stream. Their CRC is independent of the
+# XBee checksum, and the whole-file CRC is a third check across all file chunks.
+# None of these checks is encryption or sender authentication.
+#
+# Files move one 128-byte chunk per request/reply. Hex encoding makes arbitrary
+# binary bytes safe in newline-delimited text, at twice the payload character
+# count. Larger chunks/binary framing/windowing are proposed experiments, not
+# features of this implementation. A serial baud change alone cannot eliminate
+# the per-request turnaround or this encoding overhead.
 from dataclasses import dataclass
 from pathlib import Path
 import os
@@ -42,6 +59,9 @@ class Entry:
     size: int
 
 
+# The outer CRC includes the prefix, request ID and all fields. It excludes
+# its own separator/checksum and the terminating newline. Construct once per
+# request so retransmissions have exactly the same identity and payload.
 def encode(request_id, *fields):
     body = '|'.join(('@KFS1', f'{request_id:08x}', *map(str, fields))).encode('ascii')
     frame = body + f'|{zlib.crc32(body):08x}\n'.encode('ascii')
@@ -50,6 +70,9 @@ def encode(request_id, *fields):
     return frame
 
 
+# Invalid input returns None so the caller can discard noise/corruption and
+# continue scanning. A syntactically valid ERR response is different: it is a
+# real satellite result and must not be treated as a missing reply.
 def decode(line):
     try:
         body, checksum = line.rstrip(b'\r\n').rsplit(b'|', 1)
@@ -63,6 +86,9 @@ def decode(line):
         return None
 
 
+# Validate the SD path before encoding its UTF-8 bytes. UTF-8 byte length,
+# not Python character count, is the capacity shared with the C++ receiver.
+# The chosen local download path is handled separately by the UI.
 def path_hex(path):
     if not path.startswith('/') or '\\' in path or any(ord(c) < 32 or ord(c) == 127 for c in path):
         raise RemoteError('Use an absolute SD-card path')
@@ -119,6 +145,10 @@ class Client:
         if self.diagnostic is not None:
             self.diagnostic(event, **details)
 
+    # Wrap a single logical request with diagnostic context. elapsed_s includes
+    # all attempts for this request, not just the final successful attempt. The
+    # counters aggregate this Client operation; satellite SD attempts are reported
+    # inside specific error replies and are not counted as RF/protocol retries.
     def request(self, op, *args, expected=None):
         started = time.monotonic()
         context = dict(operation=op, request=f'{(self._id+1) & 0xffffffff:08x}')
@@ -145,6 +175,12 @@ class Client:
                      elapsed_s=time.monotonic()-started, counters=dict(self.counters))
         return result
 
+    # Increment the request ID once OUTSIDE the attempt loop. Retrying with a
+    # new ID could execute a successful-but-unacknowledged WRITE or capture again.
+    # The leading newline terminates a previously truncated outgoing command.
+    # A bounded receive buffer resynchronizes at newline and ignores stale IDs.
+    # The timeout begins after port.write; in API mode that write also waits for
+    # local radio TX statuses, so it is not a pure over-the-air RTT measurement.
     def _request(self, op, *args, expected=None):
         self._id = (self._id + 1) & 0xffffffff
         request_id = self._id
@@ -247,6 +283,11 @@ class Client:
     def supports_upload(self):
         return 'UPLOAD1' in self.capabilities()
 
+    # A destructive operation may succeed even when its acknowledgment is lost.
+    # Keep the original request identity and use retained RESULT metadata to
+    # reconcile the outcome. An unconfirmed result is reported as uncertainty;
+    # it must not be converted into a new operation that could affect another
+    # file appearing under the old name after the first mutation.
     def _manage(self, op, *args):
         if 'MANAGE1' not in self.capabilities():
             raise RemoteError('Satellite firmware needs the delete/rename update')
@@ -288,6 +329,10 @@ class Client:
         if self.request('CLEAN', encoded, expected={'REMOVED'}) != ['REMOVED']:
             raise RemoteError('Unexpected partial-file cleanup reply')
 
+    # Cancellation must not cancel its own cleanup immediately. Temporarily use
+    # a fresh Event and short retry/write budgets while retaining port ownership.
+    # Restore every setting in finally so the caller's cancellation state survives.
+    # Cleanup is best effort; unreachable hardware may retain a reserved partial.
     def _upload_cleanup(self, op, token):
         # Cleanup/status must still work after Cancel; keep it bounded and hold
         # the same exclusive port ownership as the transfer.
@@ -309,6 +354,13 @@ class Client:
             if setter:
                 setter(old_cancel)
 
+    # Upload has three independent checks: hash the local source before sending,
+    # hash bytes actually sent, then ask the satellite to reread its SD temporary.
+    # WRITE acknowledgment advances useful-byte progress only after a complete
+    # synced write. Recheck local file metadata/content to detect source changes.
+    # COMMIT uncertainty is special: the final name may already exist. Recover
+    # STATUS/ABORT with the known token rather than declaring failure and blindly
+    # starting another upload into the same destination.
     def upload(self, source, path):
         encoded = upload_path_hex(path)
         self.require_upload()
@@ -398,6 +450,12 @@ class Client:
             raise failure
         raise RemoteError('Upload did not complete')
 
+    # OPEN returns the authoritative size used for limits and chunk validation.
+    # Write into a unique temporary in the destination directory so failure cannot
+    # replace an existing user file. END must agree on total size and running CRC;
+    # only then flush/fsync and atomically replace the selected local destination.
+    # CLOSE cleanup uses a fresh cancellation Event and a short bounded attempt.
+    # This restarts interrupted downloads; it is not a resumable offset protocol.
     def download(self, path, destination, max_bytes=None):
         encoded = path_hex(path)
         self.hello()

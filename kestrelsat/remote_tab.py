@@ -1,4 +1,20 @@
 """Remote Files tab and worker lifecycle. All widget access stays on Tk's thread."""
+
+# READING GUIDE - Tk orchestration around a GUI-independent file client.
+# The main Tk thread validates the user's action, captures immutable arguments,
+# marks the port busy and starts one worker. The worker owns the shared serial
+# read lock until the operation and cleanup finish. It reports events through
+# app._post_rx; on_event runs later on Tk's thread and is the only widget updater.
+#
+# The busy flag is local presentation state. app._transfer_active and the shared
+# read lock are the cross-feature ownership boundary used by telemetry, Camera
+# and ZMODEM. The generation number is a stale-result guard: an event from before
+# a disconnect must not repaint a new connection's gallery or operation status.
+#
+# A protocol retry, a satellite SD read attempt, and a raw radio retransmission
+# are distinct mechanisms. Status/JSONL statistics must not present them as one
+# counter. Downloads are saved locally only after complete size/CRC agreement;
+# viewing is a separate decode step after that verified download.
 import posixpath
 from pathlib import Path
 import threading
@@ -254,6 +270,10 @@ class RemoteFilesTab:
         if messagebox.askyesno('Remove partial upload', 'Remove unfinished upload '+path+'?', parent=self.app.root) and self._ready():
             self._start('clean', path)
 
+    # Capture Tk state before the worker starts. Set the shared active flag
+    # before it competes for the read lock, preventing the normal telemetry
+    # reader from taking bytes intended for the new transfer. A fresh generation
+    # and cancellation Event identify this operation across asynchronous results.
     def _start(self, action, path, destination=None):
         self.generation += 1
         if action not in ('download', 'upload'):
@@ -275,6 +295,11 @@ class RemoteFilesTab:
         self.app._transfer_thread = worker
         worker.start()
 
+    # Everything inside the serial-read lock runs off Tk's thread. Temporarily
+    # adjust serial timeout budgets and restore them even on failure. Progress
+    # updates feed measurements immediately, but UI events are throttled to avoid
+    # flooding the bounded queue. Decoding a verified JPEG is separate from the
+    # transport result: a bad image can be correctly downloaded but not viewable.
     def _worker(self, generation, port, cancel, action, path, destination, stats):
         def post(event, **info):
             self.app._post_rx((self.event_kind, dict(info, event=event, generation=generation)))
@@ -375,6 +400,9 @@ class RemoteFilesTab:
             self.app._transfer_active.clear()
             post(**result)
 
+    # Called from app._pump_rx on Tk's thread. Ignore events for an invalidated
+    # generation; a late completion must not overwrite a fresh connection's UI.
+    # Widget state and dialogs belong here, not in the serial worker callback.
     def on_event(self, info):
         if info['generation'] != self.generation:
             return

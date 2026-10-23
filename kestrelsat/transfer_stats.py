@@ -1,4 +1,21 @@
 """Thread-safe transfer measurements, one-second sampling, and durable CSV logs."""
+
+# READING GUIDE - useful file throughput versus serial traffic.
+# A Session represents one transfer. progress records accepted useful file bytes;
+# sample computes their delta over a monotonic interval, normally one second.
+# Serial RX/TX counts additionally include framing, retries, API overhead and AT
+# queries, so they are not interchangeable with download_Bps/upload_Bps.
+#
+# A zero file rate means no new useful bytes were completed in that interval. It
+# is not a disconnect indication. RSSI is shown only when both radio reception
+# and RSSI timestamps are fresh (within two seconds) and belong to this session.
+# A stalled transfer can therefore show zero rate AND missing RSSI without the
+# serial port disconnecting or a newly measured weak-signal value.
+#
+# Monotonic clocks measure durations; UTC timestamps label/export samples. Bounded
+# in-memory history serves live graphs, while append-only CSV retains the full
+# session. CSV errors are reported as recording errors and do not stop the file
+# transfer. Recorder connects sessions to longer Recording timelines.
 from collections import deque
 import csv
 from datetime import datetime, timedelta, timezone
@@ -56,6 +73,9 @@ class Session:
             self.error = f'CSV recording unavailable: {exc}'
             self._close_log()
 
+    # Progress can describe multi-file/resumed observations. Account only new
+    # useful bytes rather than summing repeated cumulative totals from callbacks.
+    # Protocol retry markers increment their own counter without adding file bytes.
     def progress(self, **info):
         with self.lock:
             if self.status != 'running':
@@ -79,6 +99,10 @@ class Session:
             self.done = self._base + max(0, self._high-self._initial)
             self.total = self._previous_total + max(0, (info.get('total') or 0)-self._initial)
 
+    # Take a locked, coherent snapshot and divide byte DELTA by elapsed DELTA.
+    # This yields interval B/s, not UART baud and not the lifetime average. Fresh
+    # RSSI also requires a recent received packet; querying DB cannot make an old
+    # last-packet measurement evidence of a presently healthy link.
     def sample(self, force=False, now=None):
         with self.lock:
             now = self.clock() if now is None else now
@@ -125,6 +149,9 @@ class Session:
                 self.observer(self, row, now)
             return row
 
+    # Terminal state is idempotent: callbacks/cleanup may both attempt to finish.
+    # Force a final measurement before closing CSV so the last accepted bytes
+    # are represented even when less than one normal sample interval elapsed.
     def finish(self, outcome):
         with self.lock:
             if self.status != 'running':
@@ -199,6 +226,9 @@ class Recorder:
         if recording:
             recording.ingest(session.id, row, now)
 
+    # A recording may begin while a transfer is already running. Capture a
+    # snapshot/baseline under the session lock, then hand a copy to Recording;
+    # do not introduce an inverse lock order by letting Recording acquire Session.
     def start_recording(self, name):
         with self.lock:
             if self.recording:
@@ -244,6 +274,9 @@ class Recorder:
         with self.lock:
             return list(self.recordings)
 
+    # Rebuild the combined timeline from complete session CSV files, preserving
+    # the original monotonic timing and real idle gaps. Bounded live deques may
+    # have dropped old samples, so they cannot substitute for durable source CSVs.
     def combine(self, sessions, name):
         """Stream full CSVs from finished transfers in this process, preserving gaps."""
         sessions = sorted(set(sessions), key=lambda item: item.started)

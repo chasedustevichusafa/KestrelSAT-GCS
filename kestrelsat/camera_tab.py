@@ -1,4 +1,20 @@
 """Camera controls and SD image gallery, sharing the proven file-transfer worker."""
+
+# READING GUIDE - Camera reuses file-transfer ownership and mutation workers.
+# This tab subclasses RemoteFilesTab for verified downloads and SD rename/delete,
+# then adds a fixed /images gallery and capture/status actions. Camera controls
+# have the same global transfer gate as Remote Files and ZMODEM; two tabs cannot
+# independently read the same payload stream during an operation.
+#
+# Pending capture intent is written to settings BEFORE CAPTURE is dispatched.
+# Stopping the wait, disconnecting or closing the GCS does not imply an onboard
+# abort. Check capture later queries the retained identity. Persisted intent on
+# the PC and retained job status in satellite RAM have different lifetimes.
+#
+# Gallery refresh does not download thumbnails or image bytes. View downloads a
+# fresh checked local copy, decodes it off the Tk thread, and hands the image to
+# a bounded number of main-thread viewer windows. Generation checks also release
+# images carried by stale events so they do not leak after disconnect.
 from pathlib import Path
 import posixpath
 import re
@@ -57,6 +73,9 @@ class CameraTab(RemoteFilesTab):
             self.capture_button.configure(state='normal' if enabled else 'disabled')
             self.check_button.configure(state='normal' if self.pending else 'disabled')
 
+    # Persist intention before dispatch. This is what lets a restarted GCS
+    # ask about the same image even when it never saw CAPTURE's acknowledgment.
+    # Satellite job retention is still RAM-only and can independently be lost.
     def _save_pending(self, pending):
         self.pending = pending
         self.app._write_settings({'camera_pending': pending})
@@ -115,6 +134,11 @@ class CameraTab(RemoteFilesTab):
         super()._start(action, path, destination)
         self.cancel_button.configure(text='Stop waiting' if action in ('camera_capture', 'camera_check') else 'Cancel')
 
+    # Capture/status uses the same ownership boundary as file transfers. The
+    # accepted satellite job continues independently after GCS disconnection.
+    # Metadata diagnostics are best effort. Folder-list RemoteErrors are kept
+    # separately from a known capture result. Worker results carry
+    # plain data; construction of the Tk viewer is deferred to on_event.
     def _worker(self, generation, port, cancel, action, path, destination, stats):
         if not action.startswith('camera_'):
             super()._worker(generation, port, cancel, action, path, destination, stats)
@@ -197,6 +221,10 @@ class CameraTab(RemoteFilesTab):
             self.tree.insert('', tk.END, iid=key, text=entry.name,
                              values=(match[1] if match else '—', f'{entry.size:,}'))
 
+    # A stale event may own a decoded Pillow image. Close that image before
+    # ignoring the event, otherwise disconnect races can leak image memory.
+    # A successful capture refreshes/selects its SD filename; it does not start
+    # a download. Only explicit View creates a local image/window.
     def on_event(self, info):
         if info['generation'] != self.generation:
             if info.get('image') is not None:

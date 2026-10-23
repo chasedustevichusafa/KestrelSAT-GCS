@@ -33,6 +33,22 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """
 
+# READING GUIDE - standards-compatible transfer, separate from KFS1.
+# This module implements ZMODEM framing/state machines for peers such as sz/rz;
+# the Lab 8 Camera/Remote Files protocol is implemented elsewhere. Binary ZMODEM
+# support here does not mean KFS1 currently supports binary payload framing.
+#
+# _Link owns byte escaping, headers, subpacket CRCs and stream scanning. Sender
+# and receiver implement file negotiation, data movement, position recovery and
+# finish/cancel exchanges. ZRPOS requests a byte offset after an error; replaying
+# from that offset must not duplicate file bytes. Packet terminators decide whether
+# a stream continues or waits for acknowledgment. UI cancellation is supplied by
+# an Event and progress is a callback; widgets never belong in this module.
+#
+# Tests use POSIX pseudo-terminals and, when available, external lrzsz tools to
+# check interoperability. Simulated loopback success alone is weaker evidence
+# than interoperability with an independently implemented peer.
+
 import os
 import time
 import zlib
@@ -245,6 +261,9 @@ class _Link:
                 continue  # line noise between frames
             return ("data", nxt ^ 0x40)
 
+    # Scan the byte stream for a recognizable header prefix, then let the
+    # selected hex/binary parser validate its CRC. Serial read boundaries are
+    # not ZMODEM frame boundaries, so scanning/escaping state must span reads.
     def recv_header(self, timeout=None):
         """Next header as (type, flags-list), or None on timeout."""
         deadline = time.monotonic() + (self.timeout if timeout is None else timeout)
@@ -483,6 +502,10 @@ class ZModemSender:
                 # ZRINIT or anything else: keep waiting
         raise ZModemError(f"receiver never accepted {name}")
 
+    # Track the peer-acknowledged position and respond to ZRPOS recovery without
+    # inventing progress or appending duplicate bytes. File data uses ZMODEM
+    # subpacket end markers to determine continuation/acknowledgment behavior;
+    # this logic is independent of the KFS1 stop-and-wait image protocol.
     def _send_body(self, path, size, position):
         name = os.path.basename(path)
         errors = 0
@@ -687,6 +710,10 @@ class ZModemReceiver:
                 elif htype in (ZFIN, ZABORT, ZCAN):
                     raise ZModemCancelled("sender aborted mid-file")
 
+    # Accept data according to the expected file position, validate subpacket
+    # CRCs, and request retransmission from the correct offset after errors.
+    # Completion requires protocol agreement rather than simply seeing any EOF
+    # byte. The surrounding receiver controls local file lifetime and callbacks.
     def _receive_stream(self, handle, position, total, name, errors):
         """Consume data subpackets until the frame ends. Returns (ok, pos, errors)."""
         while True:

@@ -1,4 +1,15 @@
 """Transfer Statistics tab with live PyQtGraph plots and PNG/CSV export."""
+
+# READING GUIDE - presentation and exports for transfer measurements.
+# Tk owns this tab, schedules _tick and selects Session/Recording snapshots.
+# Separate PyQtGraph windows display rate and RSSI curves; CSV measurements remain
+# owned by the recorder rather than being reconstructed from plotted pixels.
+#
+# The RSSI checkbox controls optional local ground-radio DB polling during an
+# active measured transfer. It does not issue an RF command to the satellite or
+# change XCTU settings. Missing RSSI is a gap, never an invented zero dBm sample.
+# PNG export can show the full durable timeline or the current graph range; the
+# chosen export extent matters when comparing benchmark configurations.
 from pathlib import Path
 import math
 import html
@@ -177,6 +188,9 @@ class StatisticsTab:
     def selected_session(self):
         return self._sessions.get(self.selection.get())
 
+    # Runs from Tk's scheduled callback. Advance measurements, enable optional
+    # RSSI polling only for the appropriate active session, then refresh display.
+    # A closed graph window does not stop measurement or the durable CSV stream.
     def _tick(self):
         if self.app._closing:
             return
@@ -378,6 +392,9 @@ class StatisticsTab:
             except OSError as exc:
                 messagebox.showerror('CSV export failed', str(exc))
 
+    # Export a graph view, not a recalculation of the experiment. Full=True
+    # uses the complete available recording; a zoomed export uses the current
+    # range. Compare like extents/axes when presenting different configurations.
     def save_png(self, path, target='Combined', full=True):
         if not self.show_graphs():
             raise RuntimeError('Graphs unavailable')

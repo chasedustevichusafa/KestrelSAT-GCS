@@ -163,6 +163,13 @@ Follow the [diagnostic procedure and hardware acceptance checklist](docs/file-tr
 
 ### Dated changes
 
+- **2026-10-23 — Code walkthrough:** Added explanatory comments throughout the
+  current application: protocol framing/retries, serial ownership, camera jobs,
+  SD verification, measurements/recordings, plotting and GUI lifecycle. See the
+  [source reading guide](docs/code-walkthrough.md). Application behavior and
+  transfer settings are unchanged; speed experiments remain future work. The
+  Windows workflow also builds this documentation branch and retains main builds.
+
 - **2026-10-21 — Remote still-image capture:** Added the Camera tab, detected
   resolution choices, local-time filenames, SD capture status/recovery and static
   JPEG viewing. Reuses verified downloads, rename/delete and existing statistics.
