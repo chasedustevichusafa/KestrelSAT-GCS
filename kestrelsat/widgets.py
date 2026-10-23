@@ -18,6 +18,13 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """
 
+# MAINTENANCE GUIDE - reusable Tk interaction/lifecycle helpers.
+# Scrollable regions share a wheel router so the widget under the pointer receives
+# scrolling without also scrolling a surrounding container. Native wheel-claiming
+# widgets keep their class behavior. Registration/unregistration must track widget
+# lifetimes. Tooltips and delayed callbacks likewise need cancellation on close;
+# a callback targeting a destroyed Tk object can fail after its parent disappears.
+
 import tkinter as tk
 from tkinter import ttk
 

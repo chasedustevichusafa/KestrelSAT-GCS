@@ -18,6 +18,13 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """
 
+# MAINTENANCE GUIDE - centralized palette application.
+# Semantic theme tokens are shared by classic Tk widgets, ttk styles and Qt plots.
+# ThemeManager applies tokens and notifies registered components, which rebuild
+# pens/colours as needed. Keep chosen channel colours distinct from automatic
+# palette assignment. Theme changes belong on the GUI thread; they must not alter
+# serial settings, transfer state or measurement data.
+
 import tkinter as tk
 from tkinter import ttk
 from typing import Any, Callable, Dict, List, Optional

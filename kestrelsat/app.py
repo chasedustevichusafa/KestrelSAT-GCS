@@ -18,6 +18,28 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """
 
+# READING GUIDE - application composition and thread/port ownership.
+# SerialGUI builds the Tk interface and owns connection/settings/log lifetimes.
+# PlotTab instances receive the same telemetry lines but own independent parsing,
+# channels, buffers and Qt windows. Remote Files, Camera and ZMODEM share ONE
+# serial connection and must acquire exclusive transfer ownership.
+#
+# Two coordination primitives serve different purposes: _transfer_active tells
+# the ordinary telemetry reader to yield, while _serial_read_lock excludes that
+# reader even during a race with transfer startup. The API wrapper, when selected,
+# adds its own sole RAW reader below this boundary; clients still read only its
+# payload stream. Do not add a second raw reader for RSSI or camera operations.
+#
+# Worker threads post plain events to a bounded queue. Tk's _pump_rx drains a
+# bounded batch and changes widgets on the main thread. Slow widgets must not
+# block serial reception indefinitely, and background workers must never create
+# Tk variables, call widgets or schedule root.after themselves.
+#
+# Disconnect cancels/joins workers, invalidates generation-tagged tab results and
+# closes the port. Shutdown also cancels scheduled callbacks and closes plot/image
+# windows/logs. Runtime settings, logs and downloads are relative to the launch
+# directory; this source package does not contain users' captured data.
+
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
 try:
@@ -1077,6 +1099,11 @@ class SerialGUI:
         else:
             self.connect()
     
+    # Capture selected COM/baud/framing settings and build a fresh connection.
+    # API initialization queries the GROUND radio before transfer clients run;
+    # a local API timeout can indicate ground baud/AP mismatch even if firmware
+    # is correct. A new connection needs new stop/cancel lifetimes, not revival
+    # of an old reader by clearing an Event that another thread still holds.
     def connect(self):
         """Connect to serial port or start test mode"""
         if self._transfer_thread is not None and self._transfer_thread.is_alive():
@@ -1178,6 +1205,10 @@ class SerialGUI:
         except ValueError as e:
             messagebox.showerror("Configuration Error", f"Invalid configuration: {str(e)}")
     
+    # Invalidate connection state before waiting for workers. Cancellation and
+    # bounded joins allow I/O cleanup, while generation guards reject late UI
+    # results. Closing a removed USB device can raise; even then, UI/port state
+    # must become disconnected. This is distinct from a temporary zero-rate sample.
     def disconnect(self):
         """Disconnect from serial port"""
         self.transfer_recorder.event('disconnected', 'Serial connection closed')
@@ -1224,6 +1255,11 @@ class SerialGUI:
         
         self.log_message("Disconnected", "SYSTEM")
     
+    # The ordinary reader owns telemetry bytes only while no exclusive transfer
+    # is active. Recheck the active flag AFTER acquiring the read lock: a worker
+    # could claim the port between the first flag check and lock acquisition.
+    # Captured port/Event references prevent reconnect from reviving this reader
+    # against a newly assigned serial connection.
     def read_serial_data(self):
         """Read data from serial port in a separate thread"""
         # Capture the Event and the port once. Re-reading self.serial_connection
@@ -1272,6 +1308,10 @@ class SerialGUI:
         except queue.Full:
             self._rx_dropped += 1
 
+    # Only the GUI thread drains this queue and calls tab handlers. A batch
+    # budget keeps a fast telemetry source from starving redraws and controls.
+    # Overflow reporting is explicit; silently growing an unbounded queue would
+    # hide the problem until memory use or user-visible latency became excessive.
     def _pump_rx(self):
         """Drain the worker queue on the main thread."""
         if self._closing:
@@ -1569,6 +1609,10 @@ class SerialGUI:
         self.disconnect()
         messagebox.showerror("Connection Lost", "Serial connection was lost")
     
+    # Bytes arriving outside exclusive transfers are decoded into monitor/log
+    # text and complete telemetry lines. Each PlotTab receives lines separately
+    # so delimiter/channel state is not shared. A partial trailing line must be
+    # retained across serial reads rather than parsed as a complete sample.
     def display_received_data(self, data: bytes):
         """Display received data in the text widget"""
         try:
@@ -1943,6 +1987,10 @@ class SerialGUI:
 
         return default_settings
 
+    # Persist small preference/pending-intent updates without treating runtime
+    # settings as checked-in source. Camera job identity must be saved before
+    # sending CAPTURE. Disk errors can prevent durable recovery across restarts;
+    # they do not synchronize the satellite's independent RAM job lifetime.
     def _write_settings(self, updates: Dict[str, Any]):
         """Merge updates into the settings file.
 
@@ -1982,6 +2030,9 @@ class SerialGUI:
         except ValueError:
             pass
     
+    # Shutdown order matters: stop scheduled GUI callbacks, coordinate active
+    # workers/recordings, close owned windows and logs, then destroy Tk. Background
+    # threads must not retain work that later tries to update a destroyed root.
     def on_closing(self):
         """Handle window closing"""
         # Reachable from WM_DELETE_WINDOW, File > Quit and Ctrl+Q, so guard

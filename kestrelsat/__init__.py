@@ -18,6 +18,11 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """
 
+# PACKAGE GUIDE: __version__ is the release/version source of truth.
+# Importing the package should not create Tk/Qt windows, touch user data or open
+# a radio. The release workflow compares the package version with a v* tag;
+# ordinary comment/documentation updates do not require a version increment.
+
 # Single source of truth for the version. The window title, the About dialog
 # and the release tag all read from here, so a bump is one edit.
 __version__ = "3.2.0"

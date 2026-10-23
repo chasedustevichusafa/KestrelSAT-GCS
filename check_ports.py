@@ -3,6 +3,12 @@
 Check available serial ports on the system
 """
 
+# DIAGNOSTIC GUIDE: enumeration lists OS-visible serial devices, not verified
+# satellite links. Seeing a COM port says nothing about its radio baud, AP mode,
+# destination address or SD/camera health. This helper neither opens the port nor
+# programs XCTU settings. Use the GCS Connection tab for actual communication;
+# TEST MODE supplies simulated telemetry and is not a hardware file-transfer test.
+
 try:
     import serial.tools.list_ports
 except ImportError:

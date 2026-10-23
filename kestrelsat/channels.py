@@ -18,6 +18,12 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """
 
+# READING GUIDE - state for one telemetry channel within one plot.
+# The dataclass groups channel identity, chosen presentation and sample/control
+# state so PlotTab can manage the channel consistently. Instances are per plot;
+# a channel label reused in another PlotTab does not imply shared data buffers or
+# shared Tk controls. Keep Qt/Tk resources tied to their owning GUI lifecycle.
+
 from collections import deque
 from dataclasses import dataclass
 from typing import Any

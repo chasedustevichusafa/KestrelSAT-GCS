@@ -27,6 +27,12 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """
 
+# MAINTENANCE GUIDE - palette data and contrast helpers.
+# Every palette must expose the same semantic token keys so consumers can switch
+# without missing values. Contrast calculations operate on colours, not on widget
+# state. Adding a theme requires token-parity and accessibility checks; changing
+# presentation must not change channel identity or recorded measurement values.
+
 from typing import Any, Dict
 
 SETTINGS_FILE = "serial_gui_settings.json"

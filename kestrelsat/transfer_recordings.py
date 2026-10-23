@@ -1,4 +1,20 @@
 """Continuous, bounded-memory recordings spanning independent transfer sessions."""
+
+# READING GUIDE - one timeline spanning several independent operations.
+# A Recording has its own monotonic origin, CSV files, bounded graph history,
+# operation summaries and event markers. A Session may begin before recording
+# starts or continue after it stops; partial_start/partial_end preserve that fact.
+# Capturing stops/starts observation, not the underlying radio transfer.
+#
+# begin copies a Session snapshot and records its byte baseline. ingest accepts
+# that session's subsequent samples; idle preserves real gaps between operations.
+# Only bytes observed during this recording enter captured_bytes. Active-average
+# throughput and whole-recording average differ because the latter includes idle.
+#
+# Samples, operations and events have separate durable CSVs. Full graph export
+# can reread the measurement CSV instead of relying on the bounded deque. Combining
+# old sessions preserves their original timing; it does not concatenate them into
+# a fictional continuous transfer or modify their source logs.
 from collections import deque
 import csv
 import math
@@ -100,6 +116,11 @@ class Recording:
                                 partial_start=partial)
             self.event('operation_started', info['name'], now, info['id'])
 
+    # A row advances one timeline interval. Source measurements contribute
+    # radio/serial context; useful byte deltas contribute totals only in the active
+    # operation's direction. Idle rows keep elapsed time but add no transferred
+    # bytes. Active and recording-wide averages intentionally have different
+    # denominators, which matters when comparing back-to-back benchmark runs.
     def _row(self, now, delta=0, source=None):
         interval = max(0, now-self.last_sample)
         elapsed = max(0, now-self.started)
@@ -169,6 +190,9 @@ class Recording:
         self.current = None
         self._row(now)  # Drop rate to zero at the boundary, before the idle gap.
 
+    # Stopping recording while a transfer continues ends only observation.
+    # Mark the operation partial/in_progress and close recording CSVs, without
+    # calling Cancel on the transfer or inventing a completed-file outcome.
     def finish(self, now, outcome='stopped'):
         with self.lock:
             if self.status != 'running':
@@ -192,6 +216,9 @@ class Recording:
                         elapsed=last.get('elapsed_s', 0), error=self.error, csv_path=str(self.csv_path),
                         operations_path=str(self.operations_path), events_path=str(self.events_path))
 
+    # For full exports, reread durable rows when the live history no longer
+    # contains the beginning. This affects display/export completeness only;
+    # source measurement logs and original session histories stay independent.
     def graph_snapshot(self):
         """Stream a full-timeline overview, keeping extrema with bounded plot memory."""
         with self.lock:

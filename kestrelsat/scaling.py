@@ -39,6 +39,13 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """
 
+# MAINTENANCE GUIDE - scale from original logical measurements.
+# DPI awareness is enabled before constructing Tk. Pixel dimensions and derived
+# fonts then use one application scale factor. Reapplying a preference must use
+# saved baselines, not multiply already-scaled font sizes/padding repeatedly.
+# Work-area clamping keeps dialogs/viewers reachable on small screens; it does
+# not change radio, telemetry sampling or file-transfer timing.
+
 import re
 import sys
 import tkinter as tk

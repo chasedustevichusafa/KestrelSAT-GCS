@@ -25,6 +25,12 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """
 
+# LAUNCHER GUIDE: keep this stable filename for source launches and PyInstaller.
+# Importing main does not open a serial port; the __main__ guard starts the app
+# when executed. Application composition, DPI setup and event-loop startup are
+# in kestrelsat/app.py. Moving implementation modules should not require users
+# to change their launch command or the executable's configured entry point.
+
 from kestrelsat.app import main
 
 if __name__ == "__main__":

@@ -3,6 +3,23 @@
 The satellite radio may remain transparent. No +++ command mode or radio writes
 are used here. Local AP/DH/DL/NP queries use API AT frames only.
 """
+
+# READING GUIDE - the ground radio's AP=1 envelope, not the SD protocol.
+# One dedicated raw reader parses API frames and routes RF bytes, local AT replies
+# and TX statuses to different destinations. KFS/ZMODEM clients read only RF bytes;
+# RSSI queries cannot steal a file reply by reading the raw serial port themselves.
+#
+# API frame IDs identify LOCAL radio exchanges. KFS request IDs identify satellite
+# commands carried inside RF data. They are different namespaces with different
+# checksums and timeouts. A successful TX status is not proof that the satellite
+# processed a command or that a completed file checksum matches.
+#
+# The satellite radio remains transparent/AP=0. Ground AP must be 1 (unescaped
+# API), ground UART baud must match the GCS, and the ESP32 UART must match its
+# satellite radio. DH/DL destinations are read at connection; this module does
+# not write radio settings or change network/baud configuration. Unicast with
+# MAC ACKs and broadcast have different delivery guarantees; this parser alone
+# cannot supply receiver acknowledgments for a broadcast transmission.
 import threading
 import time
 import serial
@@ -20,6 +37,10 @@ class Parser:
         self.buffer = bytearray()
         self.last_byte = 0
 
+    # Serial reads may split one API frame or combine many. Retain incomplete
+    # bytes across calls, validate length/checksum, and resynchronize after noise.
+    # An idle gap discards an old partial frame so it cannot poison a new exchange.
+    # This expects AP=1; escaped AP=2 would need a different byte-decoding layer.
     def feed(self, data, now=None):
         now = time.monotonic() if now is None else now
         if self.buffer and now-self.last_byte > 2:
@@ -129,6 +150,10 @@ class ApiSerial:
         self._reader.start()
         self._poller = None
 
+    # Read-only local AT queries establish AP mode, destination and maximum
+    # RF payload. NP controls how one client write is split into radio requests;
+    # it does not change the KFS useful chunk size or permit arbitrary KFS frames.
+    # Destination changes in XCTU require reconnecting so this snapshot is renewed.
     def initialize(self):
         try:
             if self.at('AP') != b'\x01':
@@ -166,6 +191,11 @@ class ApiSerial:
         if kind == 0x10 and self._transfer_cancel is not None and self._transfer_cancel.is_set():
             raise serial.SerialException('File transfer cancelled')
 
+    # Install pending state before writing so a very fast reply cannot race past
+    # its waiter. The physical write lock covers one frame's bytes, not its reply
+    # wait: local DB queries and RF TX exchanges can coexist. Conditions wake the
+    # correct pending waiter. Retire IDs after errors so late replies cannot be
+    # mistaken for a newer exchange that happens to reuse the same eight-bit ID.
     def _request(self, kind, body, expected, timeout=1.5, command=None):
         with self._condition:
             self._raise_if_closed()
@@ -215,6 +245,11 @@ class ApiSerial:
             raise serial.SerialException(f'XBee AT{command} failed (status {response[4]})')
         return response[5:]
 
+    # Demultiplex instead of exposing all API bytes to the file protocol. The
+    # course radio emits legacy 0x80/0x81 headers; 0x90/0x91 are also accepted.
+    # Source filtering compares an address only when that frame contains a
+    # comparable address type. AT/TX-status frames satisfy their own pending IDs;
+    # only actual RF payload extends the bounded client-readable byte queue.
     def _dispatch(self, packet):
         with self._condition:
             kind = packet[0]
@@ -272,6 +307,10 @@ class ApiSerial:
                     self._error = exc
                     self._condition.notify_all()
 
+    # DB is a LOCAL ground-radio AT query for last-received signal strength.
+    # Poll at most about once per second and only after new RF reception. It is
+    # not a remote satellite ping. A DB timeout records an RSSI error; it does
+    # not close a healthy payload stream or create an artificial zero-dBm sample.
     def _poll_loop(self):
         sampled = -1
         next_poll = 0
@@ -342,6 +381,10 @@ class ApiSerial:
             del self._payload[:len(result)]
             return result
 
+    # Serialize application payload writes to keep their fragments in order.
+    # Each fragment gets a TX status before the next is sent. That status checks
+    # local radio delivery, while the caller still needs its satellite command
+    # reply. The shared deadline bounds a multi-fragment write as a whole.
     def write(self, data):
         if self.destination is None:
             raise serial.SerialException('XBee API transport has not been initialized')
