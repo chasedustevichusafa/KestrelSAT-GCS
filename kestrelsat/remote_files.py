@@ -15,11 +15,14 @@ must be exclusively owned by this client for the duration of an operation.
 # XBee checksum, and the whole-file CRC is a third check across all file chunks.
 # None of these checks is encryption or sender authentication.
 #
-# Files move one 128-byte chunk per request/reply. Hex encoding makes arbitrary
-# binary bytes safe in newline-delimited text, at twice the payload character
-# count. Larger chunks/binary framing/windowing are proposed experiments, not
-# features of this implementation. A serial baud change alone cannot eliminate
-# the per-request turnaround or this encoding overhead.
+# Legacy peers still move 128-byte hex chunks. FAST1 peers negotiate a per-file
+# chunk/codec using OPENX/PUTX; HELLO stays unchanged so old clients work with new
+# firmware. Base64 reduces data expansion from 2x to about 4/3x. Optional batches
+# contain TWO data requests, never a full file or an unbounded sliding window.
+# A batch drains before the next begins, matching the firmware's two-entry replay
+# cache. This bounds loss recovery and avoids treating a lost reply as lost data.
+import base64
+import binascii
 from dataclasses import dataclass
 from pathlib import Path
 import os
@@ -34,6 +37,37 @@ MAX_LINE = 1024
 MAX_PATH = 192
 CHUNK = 128
 MAX_ENTRIES = 4096
+
+
+@dataclass(frozen=True)
+class TransferProfile:
+    chunk: int
+    codec: str
+    batch: int = 1
+
+    @property
+    def label(self):
+        return f'{self.chunk}-{self.codec}-batch{self.batch}'
+
+
+# The UI captures this choice before starting a worker. Auto selects the larger
+# compact mode only after explicit FAST1 capability discovery; old peers receive
+# only legacy commands. Explicit experiments fail clearly on old firmware.
+PROFILE_LABELS = {
+    'auto': 'Auto (512 bytes, Base64)',
+    'legacy': 'Baseline (128 bytes, hex)',
+    'hex256': 'Larger blocks (256 bytes, hex)',
+    'b64_256': 'Compact (256 bytes, Base64)',
+    'b64_512': 'Fast (512 bytes, Base64)',
+    'batch2': 'Experimental (512 bytes, Base64, batch 2)',
+}
+PROFILES = {
+    'legacy': TransferProfile(128, 'HEX'),
+    'hex256': TransferProfile(256, 'HEX'),
+    'b64_256': TransferProfile(256, 'B64'),
+    'b64_512': TransferProfile(512, 'B64'),
+    'batch2': TransferProfile(512, 'B64', 2),
+}
 
 
 class RemoteError(Exception):
@@ -124,7 +158,12 @@ def unsigned(text, maximum=0xffffffff):
 
 
 class Client:
-    def __init__(self, port, cancel=None, progress=None, timeout=4.0, attempts=4, diagnostic=None):
+    def __init__(self, port, cancel=None, progress=None, timeout=4.0, attempts=4, diagnostic=None, profile='auto'):
+        if profile not in PROFILE_LABELS:
+            raise ValueError('Unknown transfer profile')
+        self.requested_profile = profile
+        self.transfer_profile = PROFILES['legacy']
+        self.fast = False
         self.port = port
         self.cancel = cancel or threading.Event()
         self.progress = progress or (lambda **info: None)
@@ -152,7 +191,7 @@ class Client:
     def request(self, op, *args, expected=None):
         started = time.monotonic()
         context = dict(operation=op, request=f'{(self._id+1) & 0xffffffff:08x}')
-        if op in ('READ', 'WRITE', 'VERIFY') and len(args) > 1:
+        if op in ('READ', 'READX', 'WRITE', 'WRITEX', 'VERIFY') and len(args) > 1:
             context['offset'] = args[1]
         self._attempt = 0
         self._record('request', **context)
@@ -191,7 +230,7 @@ class Client:
             if attempt:
                 self.counters['retries'] += 1
                 self._record('retry', operation=op, request=f'{request_id:08x}',
-                             attempt=attempt+1, offset=args[1] if op in ('READ', 'WRITE', 'VERIFY') and len(args) > 1 else None)
+                             attempt=attempt+1, offset=args[1] if op in ('READ', 'READX', 'WRITE', 'WRITEX', 'VERIFY') and len(args) > 1 else None)
                 self.progress(status=f'No valid reply; retry {attempt}/{self.attempts-1}', retry=1)
             # Prepending newline also terminates any truncated previous request.
             outgoing = b'\n' + frame
@@ -200,44 +239,157 @@ class Client:
             deadline = time.monotonic() + self.timeout
             while time.monotonic() < deadline:
                 self._check_cancel()
-                data = self.port.read(min(max(self.port.in_waiting, 1), MAX_LINE))
-                if not data:
-                    continue
-                for byte in data:
-                    if byte == 10:
-                        reply = None if self._discard else decode(bytes(self._buffer))
-                        self._buffer.clear()
-                        self._discard = False
-                        if reply is None:
-                            self.counters['malformed'] += 1
-                            continue
-                        if reply[0] != request_id:
-                            self.counters['stale'] += 1
-                            continue
-                        fields = reply[1]
-                        if fields[0] == 'ERR':
-                            if len(fields) == 6 and fields[1] in ('READ_FAILED', 'WRITE_FAILED', 'VERIFY_READ_FAILED'):
-                                raise RemoteError(f'Satellite: {fields[1]} offset={fields[2]} '
-                                    f'wanted={fields[3]} got={fields[4]} attempts={fields[5]}')
-                            raise RemoteError('Satellite: ' + ' '.join(fields[1:]))
-                        if expected and fields[0] not in expected:
-                            raise RemoteError(f'Unexpected satellite response: {fields[0]}')
-                        return fields
-                    elif not self._discard:
-                        if len(self._buffer) < MAX_LINE:
-                            self._buffer.append(byte)
-                        else:
-                            self._buffer.clear()
-                            self._discard = True
+                for reply in self._receive():
+                    if reply[0] != request_id:
+                        self.counters['stale'] += 1
+                        continue
+                    fields = reply[1]
+                    self._validate_reply(fields, expected)
+                    return fields
             self.counters['timeouts'] += 1
             self._record('timeout', operation=op, request=f'{request_id:08x}',
-                         attempt=attempt+1, offset=args[1] if op in ('READ', 'WRITE', 'VERIFY') and len(args) > 1 else None,
+                         attempt=attempt+1, offset=args[1] if op in ('READ', 'READX', 'WRITE', 'WRITEX', 'VERIFY') and len(args) > 1 else None,
                          counters=dict(self.counters))
         detail = 'Satellite did not reply. Check Lab 8 firmware, SD card, radio link and baud rate.'
         diagnostic = getattr(self.port, 'diagnostic_summary', None)
         if callable(diagnostic):
             detail += ' ' + diagnostic()
         raise RemoteError(detail)
+
+    def _receive(self):
+        """Parse a complete read before returning, preserving any trailing partial line.
+
+        One serial/API read can contain several replies. Returning from inside
+        the byte loop would throw away a second reply or the start of its frame,
+        making batched transfers fail intermittently even on a lossless wire.
+        """
+        data = self.port.read(min(max(self.port.in_waiting, 1), MAX_LINE))
+        replies = []
+        for byte in data:
+            if byte == 10:
+                reply = None if self._discard else decode(bytes(self._buffer))
+                self._buffer.clear()
+                self._discard = False
+                if reply is None:
+                    self.counters['malformed'] += 1
+                else:
+                    replies.append(reply)
+            elif not self._discard:
+                if len(self._buffer) < MAX_LINE:
+                    self._buffer.append(byte)
+                else:
+                    self._buffer.clear()
+                    self._discard = True
+        return replies
+
+    @staticmethod
+    def _validate_reply(fields, expected):
+        if fields[0] == 'ERR':
+            if len(fields) == 6 and fields[1] in ('READ_FAILED', 'WRITE_FAILED', 'VERIFY_READ_FAILED'):
+                raise RemoteError(f'Satellite: {fields[1]} offset={fields[2]} '
+                    f'wanted={fields[3]} got={fields[4]} attempts={fields[5]}')
+            raise RemoteError('Satellite: ' + ' '.join(fields[1:]))
+        if expected and fields[0] not in expected:
+            raise RemoteError(f'Unexpected satellite response: {fields[0]}')
+
+    def _select_profile(self):
+        """Negotiate once per file, never switch encodings mid-transfer.
+
+        Auto can fall back before opening a file. A timeout, SD error or checksum
+        failure during a transfer must remain an error, not restart silently in
+        another mode and hide a reliability problem in the benchmark data.
+        """
+        requested = self.requested_profile
+        self.fast = requested != 'legacy' and 'FAST1' in self.capabilities()
+        if requested == 'legacy':
+            self.hello()
+        if not self.fast and requested not in ('auto', 'legacy'):
+            raise RemoteError('This transfer profile needs FAST1 speed-test firmware; select Auto or Baseline')
+        self.transfer_profile = PROFILES['b64_512' if self.fast and requested == 'auto' else
+                                         requested if self.fast else 'legacy']
+        actual = self.transfer_profile.label
+        self._record('transfer_profile', requested=requested, transfer_profile=actual,
+                     chunk=self.transfer_profile.chunk, codec=self.transfer_profile.codec,
+                     batch=self.transfer_profile.batch, fallback=requested == 'auto' and not self.fast)
+        self.progress(transfer_profile=actual, status='Transfer profile: '+actual)
+
+    def _encode_block(self, block):
+        return (base64.b64encode(block).decode('ascii') if self.transfer_profile.codec == 'B64'
+                else block.hex())
+
+    def _decode_block(self, text):
+        try:
+            if self.transfer_profile.codec == 'HEX':
+                return bytes.fromhex(text)
+            block = base64.b64decode(text, validate=True)
+            if base64.b64encode(block).decode('ascii') != text:
+                raise ValueError('Noncanonical Base64')
+            return block
+        except (ValueError, binascii.Error) as exc:
+            raise RemoteError('Invalid file data') from exc
+
+    def _data_requests(self, op, requests, expected):
+        """Bounded two-request experiment with same-ID, ordered loss recovery.
+
+        A batch completes entirely before the next is sent. Keep successes and
+        retry only unconfirmed members. BAD_OFFSET on a later member means the
+        earlier request did not arrive; it is retried after the missing member,
+        not treated as SD damage. Firmware must not cache that transient error.
+        Useful-byte progress is reported only after replies are validated by the
+        upload/download loop. Radio TX status remains independent of this ACK.
+        """
+        if len(requests) == 1:
+            return [self.request(op, *requests[0], expected={expected})]
+        if not 1 < len(requests) <= 2 or not self.fast:
+            raise RemoteError('Invalid transfer request batch')
+        pending, results, order = {}, {}, []
+        for args in requests:
+            self._id = (self._id+1) & 0xffffffff
+            order.append(self._id)
+            pending[self._id] = (args, encode(self._id, op, *args))
+        for attempt in range(1, self.attempts+1):
+            self._check_cancel()
+            for request_id, (args, frame) in pending.items():
+                self._record('request' if attempt == 1 else 'retry', operation=op,
+                             request=f'{request_id:08x}', offset=args[1], attempt=attempt, batch=2)
+            if attempt > 1:
+                self.counters['retries'] += len(pending)
+                self.progress(retry=len(pending), status=f'Batch recovery: attempt {attempt}/{self.attempts}')
+            # At most two 512-byte Base64 commands (< 1.6 KiB) fit the firmware's
+            # 2 KiB UART ring. One API write preserves their ordering and shares
+            # one bounded write deadline; it still checks every radio TX status.
+            outgoing = b'\n'+b''.join(frame for args, frame in pending.values())
+            if self.port.write(outgoing) != len(outgoing):
+                raise RemoteError('Incomplete serial write')
+            deadline = time.monotonic()+self.timeout
+            deferred = set()
+            while time.monotonic() < deadline:
+                self._check_cancel()
+                for request_id, fields in self._receive():
+                    if request_id not in pending:
+                        self.counters['stale'] += 1
+                        continue
+                    if fields == ['ERR', 'BAD_OFFSET']:
+                        deferred.add(request_id)
+                        continue
+                    self._validate_reply(fields, {expected})
+                    results[request_id] = fields
+                    args, frame = pending.pop(request_id)
+                    deferred.discard(request_id)
+                    self._record('reply', operation=op, request=f'{request_id:08x}',
+                                 offset=args[1], attempt=attempt, batch=2)
+                if not pending:
+                    return [results[request_id] for request_id in order]
+                if deferred == set(pending):
+                    break # All remaining requests got a recoverable future-offset reply.
+            for request_id, (args, frame) in pending.items():
+                if request_id not in deferred:
+                    self.counters['timeouts'] += 1
+                    self._record('timeout', operation=op, request=f'{request_id:08x}',
+                                 offset=args[1], attempt=attempt, counters=dict(self.counters))
+        offsets = ', '.join(str(args[1]) for args, frame in pending.values())
+        raise RemoteError(f'Transfer batch did not complete: {op} offsets={offsets}; '
+                          'try the non-batched Fast profile and inspect diagnostics')
 
     def hello(self):
         reply = self.request('HELLO', expected={'HELLO'})
@@ -364,6 +516,8 @@ class Client:
     def upload(self, source, path):
         encoded = upload_path_hex(path)
         self.require_upload()
+        self._select_profile()
+        chunk = self.transfer_profile.chunk
         token = None
         started = time.monotonic()
         completed = commit_started = False
@@ -392,21 +546,33 @@ class Client:
                 # PUT's request ID is also its session token. Knowing it before
                 # the reply permits ABORT even if every READY reply is lost.
                 token = f'{(self._id+1) & 0xffffffff:08x}'
-                ready = self.request('PUT', encoded, total, f'{expected_crc:08x}', expected={'READY'})
-                if ready != ['READY', token, str(total)]:
+                opening = ('PUTX' if self.fast else 'PUT')
+                extra = (chunk, self.transfer_profile.codec) if self.fast else ()
+                ready = self.request(opening, encoded, total, f'{expected_crc:08x}', *extra, expected={'READY'})
+                metadata = ['READY', token, str(total)]+([str(chunk), self.transfer_profile.codec] if self.fast else [])
+                if ready != metadata:
                     raise RemoteError('Invalid upload session metadata')
                 done = sent_crc = 0
                 while done < total:
                     self._check_cancel()
-                    block = local.read(min(CHUNK, total-done))
-                    if len(block) != min(CHUNK, total-done):
-                        raise RemoteError('Local source changed during upload')
-                    reply = self.request('WRITE', token, done, block.hex(), expected={'ACK'})
-                    if reply != ['ACK', str(done+len(block)), str(total)]:
-                        raise RemoteError('Incorrect satellite upload acknowledgment')
-                    done += len(block)
-                    sent_crc = zlib.crc32(block, sent_crc)
-                    self.progress(done=done, total=total, elapsed=time.monotonic()-started)
+                    blocks, requests = [], []
+                    offset = done
+                    for _ in range(self.transfer_profile.batch):
+                        if offset >= total:
+                            break
+                        block = local.read(min(chunk, total-offset))
+                        if len(block) != min(chunk, total-offset):
+                            raise RemoteError('Local source changed during upload')
+                        blocks.append(block)
+                        requests.append((token, offset, self._encode_block(block)))
+                        offset += len(block)
+                    replies = self._data_requests('WRITEX' if self.fast else 'WRITE', requests, 'ACK')
+                    for block, reply in zip(blocks, replies):
+                        if reply != ['ACK', str(done+len(block)), str(total)]:
+                            raise RemoteError('Incorrect satellite upload acknowledgment')
+                        done += len(block)
+                        sent_crc = zlib.crc32(block, sent_crc)
+                        self.progress(done=done, total=total, elapsed=time.monotonic()-started)
                 final_stat = os.fstat(local.fileno())
                 if (local.read(1) or sent_crc != expected_crc or final_stat.st_size != total or
                         final_stat.st_mtime_ns != source_stat.st_mtime_ns):
@@ -458,13 +624,16 @@ class Client:
     # This restarts interrupted downloads; it is not a resumable offset protocol.
     def download(self, path, destination, max_bytes=None):
         encoded = path_hex(path)
-        self.hello()
+        self._select_profile()
+        chunk = self.transfer_profile.chunk
         token = None
         temporary = None
         started = time.monotonic()
         try:
-            reply = self.request('OPEN', encoded, expected={'FILE'})
-            if len(reply) != 3 or len(reply[1]) != 8:
+            extra = (chunk, self.transfer_profile.codec) if self.fast else ()
+            reply = self.request('OPENX' if self.fast else 'OPEN', encoded, *extra, expected={'FILE'})
+            if (len(reply) != (5 if self.fast else 3) or len(reply[1]) != 8 or
+                    self.fast and reply[3:] != [str(chunk), self.transfer_profile.codec]):
                 raise RemoteError('Invalid file metadata')
             try:
                 int(reply[1], 16)
@@ -481,19 +650,19 @@ class Client:
                 self.progress(done=done, total=total, elapsed=0)
                 while done < total:
                     self._check_cancel()
-                    reply = self.request('READ', token, done, expected={'DATA'})
-                    if len(reply) != 3 or unsigned(reply[1]) != done:
-                        raise RemoteError('Incorrect file offset')
-                    try:
-                        block = bytes.fromhex(reply[2])
-                    except ValueError as exc:
-                        raise RemoteError('Invalid file data') from exc
-                    if len(block) != min(CHUNK, total - done):
-                        raise RemoteError('Incorrect file chunk length')
-                    output.write(block)
-                    crc = zlib.crc32(block, crc)
-                    done += len(block)
-                    self.progress(done=done, total=total, elapsed=time.monotonic()-started)
+                    offsets = list(range(done, min(total, done+chunk*self.transfer_profile.batch), chunk))
+                    replies = self._data_requests('READX' if self.fast else 'READ',
+                                                  [(token, offset) for offset in offsets], 'DATA')
+                    for reply in replies:
+                        if len(reply) != 3 or unsigned(reply[1]) != done:
+                            raise RemoteError('Incorrect file offset')
+                        block = self._decode_block(reply[2])
+                        if len(block) != min(chunk, total-done):
+                            raise RemoteError('Incorrect file chunk length')
+                        output.write(block)
+                        crc = zlib.crc32(block, crc)
+                        done += len(block)
+                        self.progress(done=done, total=total, elapsed=time.monotonic()-started)
                 reply = self.request('END', token, expected={'DONE'})
                 if reply != ['DONE', str(total), f'{crc:08x}']:
                     raise RemoteError('Whole-file checksum failed; download was not saved')

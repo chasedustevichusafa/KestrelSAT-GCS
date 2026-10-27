@@ -30,7 +30,7 @@ from .transfer_recordings import Recording
 COLUMNS = ('session', 'started_utc', 'protocol', 'direction', 'file', 'baud', 'transport',
            'status', 'elapsed_s', 'interval_s', 'file_bytes', 'total_bytes',
            'download_Bps', 'upload_Bps', 'average_Bps', 'serial_rx_Bps', 'serial_tx_Bps',
-           'protocol_retries', 'radio_tx_retries', 'rssi_dBm', 'rssi_age_s', 'rssi_polling', 'sample_utc')
+           'protocol_retries', 'radio_tx_retries', 'rssi_dBm', 'rssi_age_s', 'rssi_polling', 'sample_utc', 'transfer_profile')
 
 
 def traffic(port):
@@ -52,6 +52,7 @@ class Session:
         self.protocol, self.direction, self.name = protocol, direction, name
         self.baud, self.mode, self.port = baud, mode, port
         self.status = 'running'
+        self.transfer_profile = ''
         self.done = self.total = self._base = self._previous_total = self._initial = self._high = 0
         self._file = None
         self.retries = 0 if protocol == 'KFS1' else None
@@ -80,6 +81,8 @@ class Session:
         with self.lock:
             if self.status != 'running':
                 return
+            if 'transfer_profile' in info:
+                self.transfer_profile = info['transfer_profile']
             if info.get('retry'):
                 self.retries = (self.retries or 0)+info['retry']
             value = info.get('done', info.get('sent', info.get('received')))
@@ -120,6 +123,7 @@ class Session:
             valid = (self.rssi_enabled and age is not None and age <= 2 and packet_at is not None
                      and now-packet_at <= 2 and rssi_at >= self.started and packet_at >= self.started)
             row = dict(session=self.id, started_utc=self.started_utc, protocol=self.protocol,
+                       transfer_profile=self.transfer_profile,
                        direction=self.direction, file=self.name, baud=self.baud, transport=self.mode,
                        status=self.status, elapsed_s=elapsed, interval_s=interval,
                        file_bytes=self.done, total_bytes=self.total,
@@ -172,6 +176,7 @@ class Session:
         with self.lock:
             return dict(started=self.started, id=self.id, name=self.name, status=self.status, done=self.done, total=self.total,
                         protocol=self.protocol, direction=self.direction, mode=self.mode, baud=self.baud,
+                        transfer_profile=self.transfer_profile,
                         retries=self.retries, error=self.error, samples=list(self.samples),
                         csv_path=str(self.csv_path), started_utc=self.started_utc,
                         rssi_note=traffic(self.port).get('rssi_error', ''))

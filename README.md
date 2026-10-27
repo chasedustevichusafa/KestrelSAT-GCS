@@ -163,6 +163,14 @@ Follow the [diagnostic procedure and hardware acceptance checklist](docs/file-tr
 
 ### Dated changes
 
+- **2026-10-27 — Transfer-speed experiments:** Added a shared transfer-profile
+  selector for Camera and Remote Files, negotiated 256/512-byte blocks, compact
+  Base64, optional two-request batches, and actual profile labels in CSV/graphs.
+  Auto uses Fast with matching firmware and falls back with older firmware;
+  Baseline retains 128-byte hex transfers. See the
+  [installation and comparison procedure](docs/transfer-speed.md). Hardware
+  speed/reliability results are pending; existing radio settings are retained.
+
 - **2026-10-23 — Code walkthrough:** Added explanatory comments throughout the
   current application: protocol framing/retries, serial ownership, camera jobs,
   SD verification, measurements/recordings, plotting and GUI lifecycle. See the

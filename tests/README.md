@@ -5,6 +5,7 @@ display. On Linux use `xvfb`; on Windows they run directly.
 
 | file | what it covers | needs a display |
 |---|---|---|
+| `test_transfer_speed.py` | Negotiated profiles, binary/tail/empty transfers, batch loss recovery, API fragmentation/RSSI, legacy fallback, CSV profile labels and wire-byte counts. Real firmware interoperability is tested in Lab 8. | no |
 | `test_transfer_stats.py` | Interval rates, stalls, unique-byte accounting, CSV recording, RSSI gaps, and PNG exports. | yes |
 | `test_xbee_api.py` | AP=1 framing, AT/status/data multiplexing, RSSI polling, timeouts, and KFS downloads through a simulated radio. | no |
 | `test_remote_files.py` | KFS1 framing, paths, timeouts, browsing, downloads, cancellation, disconnect cleanup, and serial ownership through the real tab. Uses a simulated wire peer. | yes |

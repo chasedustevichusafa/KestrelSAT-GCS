@@ -28,10 +28,10 @@ COLUMNS = ('recording', 'sample_utc', 'elapsed_s', 'interval_s', 'state', 'opera
            'protocol', 'direction', 'file', 'baud', 'transport', 'outcome',
            'captured_bytes', 'download_bytes', 'upload_bytes', 'download_Bps', 'upload_Bps',
            'active_average_Bps', 'recording_average_Bps', 'protocol_retries',
-           'radio_tx_retries', 'serial_rx_Bps', 'serial_tx_Bps', 'rssi_dBm', 'rssi_age_s', 'rssi_polling')
+           'radio_tx_retries', 'serial_rx_Bps', 'serial_tx_Bps', 'rssi_dBm', 'rssi_age_s', 'rssi_polling', 'transfer_profile')
 OPERATIONS = ('recording', 'operation', 'protocol', 'direction', 'file', 'baud', 'transport',
               'start_utc', 'end_utc', 'start_elapsed_s', 'end_elapsed_s', 'duration_s',
-              'captured_bytes', 'average_Bps', 'outcome', 'partial_start', 'partial_end')
+              'captured_bytes', 'average_Bps', 'outcome', 'partial_start', 'partial_end', 'transfer_profile')
 EVENTS = ('recording', 'timestamp_utc', 'elapsed_s', 'event', 'operation', 'detail')
 
 
@@ -138,7 +138,8 @@ class Recording:
                    interval_s=interval, state='transfer' if op else 'idle',
                    operation=op['id'] if op else '', protocol=op['protocol'] if op else '',
                    direction=direction, file=op['name'] if op else '', baud=op['baud'] if op else '',
-                   transport=op['mode'] if op else '', outcome=source.get('status', '') if source else '',
+                   transport=op['mode'] if op else '',
+                   transfer_profile=op.get('transfer_profile', '') if op else '', outcome=source.get('status', '') if source else '',
                    captured_bytes=op['captured'] if op else 0,
                    download_bytes=self.download_bytes, upload_bytes=self.upload_bytes,
                    download_Bps=delta/interval if direction == 'download' and interval > 0 else 0,
@@ -169,6 +170,7 @@ class Recording:
             delta = captured-op['captured']
             op['captured'] = captured
             op['name'] = source['file']
+            op['transfer_profile'] = source.get('transfer_profile', op.get('transfer_profile', ''))
             self._row(now, delta, source)
             if source['status'] != 'running':
                 self._end_operation(now, source['status'])
@@ -178,6 +180,7 @@ class Recording:
         duration = max(0, now-op['capture_start'])
         row = dict(recording=self.id, operation=op['id'], protocol=op['protocol'],
                    direction=op['direction'], file=op['name'], baud=op['baud'], transport=op['mode'],
+                   transfer_profile=op.get('transfer_profile', ''),
                    start_utc=self.utc(op['capture_start']), end_utc=self.utc(now),
                    start_elapsed_s=max(0, op['capture_start']-self.started),
                    end_elapsed_s=max(0, now-self.started), duration_s=duration,

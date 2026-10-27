@@ -262,6 +262,8 @@ class StatisticsTab:
                     f'{last.get("average_Bps", 0):.1f} B/s average\n'
                     f'Elapsed: {last.get("elapsed_s", 0):.1f} s | Protocol retries: {retry}\n'
                     f'Ground receiver RSSI: {rssi_text}\nCSV log: {snap["csv_path"]}')
+            if snap.get('transfer_profile'):
+                text += '\nTransfer profile: '+snap['transfer_profile']
         if snap['error']:
             text += '\n'+snap['error']
         self.summary.set(text)
@@ -372,6 +374,8 @@ class StatisticsTab:
         else:
             caption = (f'{snap["name"]} | {snap["protocol"]} {snap["direction"]} | '
                        f'{snap["baud"]} baud | {snap["status"]} | {snap["started_utc"]}')
+            if snap.get('transfer_profile'):
+                caption += ' | '+snap['transfer_profile']
         self.header.setText(html.escape(caption), color=themes.CURRENT['plot_fg'])
         self.window.setWindowTitle(f'Transfer statistics | {snap["name"]} | {snap["status"]}')
         if full or getattr(self, '_drawn_id', None) != snap['id']:

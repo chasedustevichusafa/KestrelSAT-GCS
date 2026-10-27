@@ -42,6 +42,14 @@ class RemoteFilesTab:
         self.path = tk.StringVar(value='/')
         self.status = tk.StringVar(value='Connect on the Connection tab, then Refresh to browse the satellite SD card.')
         self.progress = tk.DoubleVar(value=0)
+        # Both file pages share one preference, but every worker gets a frozen
+        # string captured on Tk's thread. Never read StringVar from a worker.
+        if not hasattr(app, 'transfer_profile_var'):
+            saved = app.settings.get('file_transfer_profile', 'auto')
+            if saved not in remote_files.PROFILE_LABELS:
+                saved = 'auto'
+            app.transfer_profile_var = tk.StringVar(value=remote_files.PROFILE_LABELS[saved])
+        self.profile_var = app.transfer_profile_var
 
         bar = ttk.Frame(self.frame)
         bar.pack(fill=tk.X)
@@ -71,6 +79,13 @@ class RemoteFilesTab:
                 button.configure(state=tk.DISABLED)
         self.cancel_button = ttk.Button(actions, text='Cancel', command=self.cancel, state=tk.DISABLED)
         self.cancel_button.pack(side=tk.LEFT)
+        speed_bar = ttk.Frame(self.frame)
+        speed_bar.pack(fill=tk.X, pady=4)
+        ttk.Label(speed_bar, text='Transfer profile:').pack(side=tk.LEFT)
+        self.profile_combo = ttk.Combobox(speed_bar, state='readonly', textvariable=self.profile_var,
+                                         values=list(remote_files.PROFILE_LABELS.values()), width=48)
+        self.profile_combo.pack(side=tk.LEFT, padx=6, fill=tk.X, expand=True)
+        self.profile_combo.bind('<<ComboboxSelected>>', self._save_profile)
         ttk.Progressbar(self.frame, variable=self.progress, maximum=100).pack(fill=tk.X, pady=4)
         self.status_label = ttk.Label(self.frame, textvariable=self.status, wraplength=450)
         self.status_label.pack(fill=tk.X, pady=(0, 8))
@@ -99,6 +114,13 @@ class RemoteFilesTab:
         app.themes.add_listener(self._theme)
         self._theme(app.themes.colors)
 
+    def _profile_key(self):
+        selected = self.profile_var.get()
+        return next((key for key, label in remote_files.PROFILE_LABELS.items() if label == selected), 'auto')
+
+    def _save_profile(self, event=None):
+        self.app._write_settings({'file_transfer_profile': self._profile_key()})
+
     def _theme(self, colors):
         style = self.app.themes.style
         style.configure('RemoteFiles.Treeview', background=colors['field_bg'],
@@ -114,6 +136,7 @@ class RemoteFilesTab:
 
     def _set_busy(self, value):
         self.busy = value
+        self.profile_combo.configure(state='disabled' if value else 'readonly')
         for button in self.buttons:
             button.configure(state=tk.DISABLED if value else tk.NORMAL)
         if not value and not self.upload_supported:
@@ -291,7 +314,7 @@ class RemoteFilesTab:
             port.set_transfer_cancel(cancel)
         stats = self.app.start_transfer_statistics('KFS1', 'download' if action == 'view' else action, path) if action in ('download', 'upload', 'view') else None
         worker = threading.Thread(target=self._worker,
-                                  args=(generation, port, cancel, action, path, destination, stats), daemon=True)
+                                  args=(generation, port, cancel, action, path, destination, stats, self._profile_key()), daemon=True)
         self.app._transfer_thread = worker
         worker.start()
 
@@ -300,7 +323,7 @@ class RemoteFilesTab:
     # updates feed measurements immediately, but UI events are throttled to avoid
     # flooding the bounded queue. Decoding a verified JPEG is separate from the
     # transport result: a bad image can be correctly downloaded but not viewable.
-    def _worker(self, generation, port, cancel, action, path, destination, stats):
+    def _worker(self, generation, port, cancel, action, path, destination, stats, profile='auto'):
         def post(event, **info):
             self.app._post_rx((self.event_kind, dict(info, event=event, generation=generation)))
         last_progress = 0
@@ -314,7 +337,7 @@ class RemoteFilesTab:
                 post('progress', **info)
                 last_progress = now
 
-        capture = Capture(dict(action=action, path=path,
+        capture = Capture(dict(action=action, path=path, requested_profile=profile,
             baud=getattr(port, 'baudrate', None),
             mode='API' if getattr(port, 'api_mode', False) else 'Transparent',
             rssi_polling=getattr(stats, 'rssi_enabled', False)))
@@ -327,7 +350,7 @@ class RemoteFilesTab:
                 try:
                     port.timeout = 0.1
                     port.write_timeout = 5.0 if getattr(port, 'api_mode', False) else 1.0
-                    client = remote_files.Client(port, cancel=cancel, progress=progress, diagnostic=capture.record)
+                    client = remote_files.Client(port, cancel=cancel, progress=progress, diagnostic=capture.record, profile=profile)
                     if action == 'list':
                         entries = client.list_directory(path)
                         result = dict(event='listed', entries=entries, path=path)
