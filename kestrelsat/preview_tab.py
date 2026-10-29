@@ -379,6 +379,10 @@ class LivePreviewTab:
             result.update(metrics=metrics, diagnostic=str(capture.path) if capture.path else '')
             if hasattr(port, 'set_transfer_cancel'):
                 port.set_transfer_cancel(None)
+            if self.closed:
+                # Shutdown may have skipped cleanup while this worker still
+                # owned staging files. No more GUI saves/captures can start.
+                shutil.rmtree(cache, ignore_errors=True)
             self.app._transfer_active.clear()
             self._completion = (generation, result)
             post('finished', result=result)
@@ -604,8 +608,12 @@ class LivePreviewTab:
         self._close_log()
 
     def close(self):
-        self.invalidate()
+        if self.closed:
+            return
         self.closed = True
+        # Publish Closed BEFORE cancellation wakes the worker, so one of this
+        # method or its finalizer always owns cleanup even in a tight exit race.
+        self.invalidate()
         if self.age_timer is not None:
             self.app.root.after_cancel(self.age_timer)
             self.age_timer = None

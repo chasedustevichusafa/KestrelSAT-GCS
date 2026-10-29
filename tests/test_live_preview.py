@@ -315,6 +315,7 @@ class TabTests(unittest.TestCase):
         self.until(lambda: self.port.captures == 1)
         request = dict(self.tab.pending)
         self.app.on_closing()
+        self.assertFalse(self.tab.cache.exists())
         from kestrelsat.app import SerialGUI
         root = tk.Tk(); app = SerialGUI(root)
         try:
