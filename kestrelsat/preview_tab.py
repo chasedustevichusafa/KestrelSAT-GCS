@@ -237,7 +237,7 @@ class LivePreviewTab:
         if now < self.next_due:
             if self.current_metadata:
                 age = max(0, now-self.current_metadata['displayed_at'])
-                self.status.set(f'Preview active | last frame {age:.1f} s old | next capture in {self.next_due-now:.1f} s')
+                self.status.set(f'Preview active | last display update {age:.1f} s ago | next capture in {self.next_due-now:.1f} s')
             self.timer = self.app.root.after(200, self._tick)
             return
         if self.info is None:
@@ -465,6 +465,14 @@ class LivePreviewTab:
         self.image, self.photo, self.current_path = receipt.image, photo, receipt.path
         now = self.clock()
         self.current_metadata = dict(receipt.metadata, displayed_at=now)
+        # Image age includes capture/download latency, rather than resetting to
+        # zero at display. Snapshot the wall-clock delta once, then use monotonic
+        # elapsed time so clock corrections cannot make a displayed frame younger.
+        try:
+            requested = datetime.fromisoformat(receipt.metadata['requested_local'])
+            self.current_metadata['age_at_display'] = max(0, (datetime.now().astimezone()-requested).total_seconds())
+        except (ValueError, TypeError):
+            self.current_metadata['age_at_display'] = None
         gap = None if self.last_display is None else now-self.last_display
         self.last_display = now
         self.frame_count += 1
@@ -491,14 +499,16 @@ class LivePreviewTab:
         self.age_timer = None
         if self.closed or self.current_metadata is None:
             return
-        age = max(0, self.clock()-self.current_metadata['displayed_at'])
         meta = self.current_metadata
+        base = meta.get('age_at_display')
+        age = None if base is None else base+max(0, self.clock()-meta['displayed_at'])
         gap = meta.get('display_interval_s')
         rate = meta.get('bytes', 0)/meta['download_s'] if meta.get('download_s') else 0
-        stale = ' | previous frame is stale' if age > int(self.interval.get()) else ''
+        stale = ' | previous frame is stale' if age is not None and age > int(self.interval.get()) else ''
+        age_text = f'{age:.1f} s' if age is not None else 'unavailable'
         self.details.set(f'Frame {self.frame_count} | {meta["requested_local"]} | '
             f'{self.image.width}×{self.image.height} | {meta.get("bytes", 0):,} bytes | '
-            f'{rate:.0f} B/s | age {age:.1f} s | actual refresh: '+
+            f'{rate:.0f} B/s | image age {age_text} | actual refresh: '+
             (f'{gap:.1f} s' if gap is not None else 'first frame')+stale)
         self.age_timer = self.app.root.after(250, self._age)
 

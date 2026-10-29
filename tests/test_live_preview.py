@@ -207,6 +207,7 @@ class TabTests(unittest.TestCase):
         self.one_frame()
         self.assertNotIn('LIST', commands)
         self.assertEqual(self.tab.image.size, (320, 240))
+        self.assertGreaterEqual(self.tab.current_metadata['age_at_display'], .2)
         self.assertFalse(self.tab.pending)
         self.assertEqual(list(self.port.files), ['/images/old.jpg'])
         self.assertEqual(self.app.transfer_recorder.active.status, 'completed')

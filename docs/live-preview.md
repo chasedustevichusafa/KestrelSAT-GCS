@@ -25,7 +25,9 @@ this update changes the GCS only.
    preferences are remembered; the running state is not.
 5. The image fits the panel and resizes with it. The details show timestamp,
    actual JPEG dimensions, bytes, download rate, frame age and achieved refresh
-   interval. A previous image is marked stale when older than the target period.
+   interval. Image age includes capture/download time and is based on the GCS
+   request timestamp. A previous image is marked stale when older than the target
+   period, including while its replacement is downloading.
 6. Press **Save frame...** to save the displayed JPEG permanently on your PC.
    The file dialog defaults to its timestamp/resolution filename. The clicked
    frame is snapshotted before opening the dialog, so arriving frames cannot
