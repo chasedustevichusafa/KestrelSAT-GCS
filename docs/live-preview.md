@@ -33,6 +33,44 @@ this update changes the GCS only.
    frame is snapshotted before opening the dialog, so arriving frames cannot
    change which picture is saved.
 
+## Resizable pop-out and speed guide (2026-10-29)
+
+Press **Pop out image** to open a separate, resizable live-image window. It can
+be opened before Start and follows every accepted preview frame. Each image is
+shown at **100% native pixels**: enlarging the window adds space around it,
+and a smaller viewport uses scrollbars. Window resizing never resamples,
+stretches or changes the captured resolution. Resolution changes affect the next
+captured frame, whose native dimensions are then used in the pop-out.
+
+The window includes Stop preview, Save frame and Return to tab. Closing it or
+pressing Escape leaves preview running in the main GCS; Return to tab also selects
+the Live Preview tab. Opening
+it again raises the same window while it is open. Its status, frame age and
+current recommendation stay synchronized with the tab.
+
+The tab includes this hardcoded starting guide from the owner's reported rates.
+JPEG budgets reserve **two seconds** of each interval for capture, SD work,
+display and cleanup. KiB means 1024 bytes. Actual overhead and JPEG size vary.
+
+| Measured tier | 5 s starting resolution | 5 s JPEG budget | 10 s starting resolution | 10 s JPEG budget |
+| --- | --- | ---: | --- | ---: |
+| Baseline, ~1500 B/s | 160×120 | 4.4 KiB | 320×240 | 11.7 KiB |
+| Auto/Fast, ~3850 B/s | 320×240 | 11.3 KiB | 320×240; VGA only if JPEG ≤30 KiB | 30.1 KiB |
+| Experimental, ~4700 B/s | 320×240 | 13.8 KiB | 640×480 | 36.7 KiB |
+
+VGA is 640×480. The earlier ~33 KB VGA example is borderline at Auto/Fast with
+this allowance, so the guide recommends a smaller starting point unless the
+actual JPEG fits. A compact JPEG may permit higher resolution; a detailed scene
+may require lower resolution. These are starting points rather than measured
+resolution guarantees.
+
+After a frame arrives, a live advice line compares its actual bytes and download
+rate with the selected interval's budget, using
+`rate × (interval − 2 seconds)`. It warns when that JPEG exceeds its budget and
+suggests a starting resolution from the nearest measured tier. Advice is
+informational and never changes your settings. The same advice appears in the
+pop-out window.
+
 The interval is a start-to-start target, including camera/SD work, transmission,
 display and cleanup. A larger or more detailed JPEG can exceed the deadline.
 Only one frame runs at a time; an overrun starts the next cycle when resources

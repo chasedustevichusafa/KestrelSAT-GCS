@@ -166,6 +166,12 @@ Follow the [diagnostic procedure and hardware acceptance checklist](docs/file-tr
 
 ### Dated changes
 
+- **2026-10-29 — Preview pop-out and recommendations:** Added a resizable native
+  pixel window for the live camera pane, with scrollbars and shared status/Save
+  controls. Added a hardcoded resolution/refresh guide for the reported 1500,
+  3850 and 4700 B/s tiers, plus current-frame size-budget advice. Window resizing
+  preserves the captured pixels. Existing firmware remains compatible.
+
 - **2026-10-29 — Live Preview:** Added an opt-in periodic camera panel, resolution
   and 5/10-second controls, actual frame timing, verified display-before-delete
   cleanup, bounded local cache and Save frame. Pending capture/delete identities

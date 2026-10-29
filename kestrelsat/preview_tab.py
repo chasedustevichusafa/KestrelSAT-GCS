@@ -18,6 +18,8 @@ from tkinter import ttk, filedialog, messagebox
 
 from . import camera_files as camera, remote_files as files
 from . import preview
+from . import preview_guidance
+from .preview_window import PreviewWindow
 from .transfer_diagnostics import Capture
 
 COLUMNS = ('timestamp_local', 'job', 'path', 'resolution', 'requested_interval_s',
@@ -42,6 +44,7 @@ class LivePreviewTab:
         self.pending = preview.pending_preview(raw_pending)
         self.invalid_pending = raw_pending is not None and self.pending is None
         self.image = self.photo = self.current_path = self.current_metadata = None
+        self.popout = None
         self.cache = None
         self.log_path = None
         self.log_handle = None
@@ -54,6 +57,7 @@ class LivePreviewTab:
         self.status = tk.StringVar(value='Preview is off. Connect, select resolution and interval, then Start.')
         self.details = tk.StringVar(value='No preview frame received.')
         self.csv_status = tk.StringVar()
+        self.advice = tk.StringVar(value='Starting recommendations below use your measured transfer speeds.')
         self.resolution = tk.StringVar(value=app.settings.get('preview_resolution', '640x480'))
         saved_interval = app.settings.get('preview_interval', 10)
         self.interval = tk.StringVar(value=str(saved_interval if saved_interval in (5, 10) else 10))
@@ -91,6 +95,8 @@ class LivePreviewTab:
         self.forget_button.pack(side=tk.LEFT, padx=(0, 6))
         self.save_button = ttk.Button(recovery, text='Save frame...', command=self.save_frame)
         self.save_button.pack(side=tk.LEFT)
+        self.popout_button = ttk.Button(recovery, text='Pop out image', command=self.open_popout)
+        self.popout_button.pack(side=tk.LEFT, padx=6)
         ttk.Progressbar(self.frame, variable=self.progress, maximum=100).pack(fill=tk.X, pady=6)
         self.status_label = ttk.Label(self.frame, textvariable=self.status, wraplength=700)
         self.status_label.pack(fill=tk.X)
@@ -98,6 +104,29 @@ class LivePreviewTab:
         self.detail_label.pack(fill=tk.X, pady=6)
         self.csv_label = ttk.Label(self.frame, textvariable=self.csv_status, wraplength=700)
         self.csv_label.pack(fill=tk.X, pady=(0, 6))
+        guide = ttk.LabelFrame(self.frame, text='Resolution / refresh starting guide', padding=6)
+        guide.pack(fill=tk.X, pady=(0, 6))
+        self.guide = ttk.Treeview(guide, columns=('tier', 'res5', 'budget5', 'res10', 'budget10'),
+                                 show='headings', height=3, selectmode='none')
+        for key, title, width in (
+                ('tier', 'Measured speed', 150), ('res5', '5 s starting point', 120),
+                ('budget5', '5 s JPEG budget', 110), ('res10', '10 s starting point', 210),
+                ('budget10', '10 s JPEG budget', 115)):
+            self.guide.heading(key, text=title)
+            self.guide.column(key, width=width, minwidth=65, stretch=True)
+        self.guide.pack(fill=tk.X)
+        scrollbar = ttk.Scrollbar(guide, orient=tk.HORIZONTAL, command=self.guide.xview)
+        scrollbar.pack(fill=tk.X)
+        self.guide.configure(xscrollcommand=scrollbar.set)
+        for row in preview_guidance.GUIDE:
+            self.guide.insert('', tk.END, values=(f'{row.name}: ~{row.speed:,} B/s', row.resolution_5s,
+                f'{row.budget(5)/1024:.1f} KiB', row.resolution_10s, f'{row.budget(10)/1024:.1f} KiB'))
+        self.guide_note = ttk.Label(guide, wraplength=700,
+            text='Approximate starting points; JPEG size varies by scene. Budgets reserve 2 s for capture/SD/display/cleanup. '
+                 'VGA = 640×480. Lower the resolution if the last JPEG exceeds its budget.')
+        self.guide_note.pack(fill=tk.X, pady=(4, 0))
+        self.advice_label = ttk.Label(guide, textvariable=self.advice, wraplength=700)
+        self.advice_label.pack(fill=tk.X)
         self.canvas = tk.Canvas(self.frame, highlightthickness=0)
         self.canvas.pack(fill=tk.BOTH, expand=True)
         self.canvas.bind('<Configure>', self._schedule_render)
@@ -110,6 +139,10 @@ class LivePreviewTab:
 
     def _theme(self, colors):
         self.canvas.configure(background=colors['field_bg'])
+        if self.popout is not None:
+            self.popout.canvas.configure(background=colors['field_bg'])
+            if self.popout.photo is None:
+                self.popout.canvas.itemconfigure(self.popout.item, fill=colors['fg'])
 
     def _wrap(self, event):
         if event.widget is self.frame:
@@ -117,6 +150,8 @@ class LivePreviewTab:
             self.status_label.configure(wraplength=width)
             self.detail_label.configure(wraplength=width)
             self.csv_label.configure(wraplength=width)
+            self.guide_note.configure(wraplength=width)
+            self.advice_label.configure(wraplength=width)
 
     def _profile_key(self):
         return next((key for key, label in files.PROFILE_LABELS.items() if label == self.profile.get()), 'auto')
@@ -127,6 +162,25 @@ class LivePreviewTab:
                                      file_transfer_profile=self._profile_key()))
         if self.running and not self.busy and self.last_cycle_start is not None:
             self.next_due = preview.next_frame_time(self.last_cycle_start, int(self.interval.get()), self.clock())
+        self._update_advice()
+
+    def _update_advice(self):
+        if self.current_metadata is not None:
+            meta = self.current_metadata
+            rate = meta.get('bytes', 0)/meta['download_s'] if meta.get('download_s') else 0
+            self.advice.set(preview_guidance.recommendation(rate, int(self.interval.get()), meta.get('bytes', 0)))
+
+    def open_popout(self):
+        if self.closed:
+            return
+        if self.popout is not None:
+            self.popout.window.deiconify()
+            self.popout.window.lift()
+            return
+        try:
+            self.popout = PreviewWindow(self)
+        except Exception as exc:
+            messagebox.showerror('Could not open preview window', str(exc), parent=self.app.root)
 
     def _controls(self):
         self.start_button.configure(state='disabled' if self.running or self.busy else 'normal')
@@ -492,6 +546,15 @@ class LivePreviewTab:
                 self.log_error = 'Could not remove old local preview cache: '+str(exc)
                 self.status.set(self.log_error)
         self._controls()
+        self._update_advice()
+        if self.popout is not None:
+            try:
+                self.popout.show_image(receipt.image)
+            except Exception as exc:
+                # The main panel already accepted the image. A secondary-view
+                # failure must not invalidate its ownership or close its pixels.
+                self.popout.close()
+                self.status.set('Frame displayed in tab; pop-out failed: '+str(exc))
         if self.age_timer is None:
             self.age_timer = self.app.root.after(250, self._age)
 
@@ -624,6 +687,8 @@ class LivePreviewTab:
         # Publish Closed BEFORE cancellation wakes the worker, so one of this
         # method or its finalizer always owns cleanup even in a tight exit race.
         self.invalidate()
+        if self.popout is not None:
+            self.popout.close()
         if self.age_timer is not None:
             self.app.root.after_cancel(self.age_timer)
             self.age_timer = None

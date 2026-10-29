@@ -15,6 +15,7 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from PIL import Image
 from kestrelsat import preview, camera_files as camera, remote_files as files
+from kestrelsat import preview_guidance
 from test_camera import CameraPort
 
 
@@ -161,6 +162,19 @@ class CycleTests(unittest.TestCase):
         mutations = []
         call.perform(mutations.append)
         self.assertFalse(mutations)
+
+    def test_recommendations_use_measured_tiers_and_explicit_time_reserve(self):
+        baseline, fast, experimental = preview_guidance.GUIDE
+        self.assertEqual([row.speed for row in preview_guidance.GUIDE], [1500, 3850, 4700])
+        self.assertEqual(baseline.budget(5), 4500)
+        self.assertEqual(experimental.budget(10), 37600)
+        self.assertLess(fast.budget(10), 33000) # Earlier VGA JPEG would be borderline.
+        self.assertIn('VGA if', fast.resolution_10s)
+        self.assertIs(preview_guidance.guide_for_speed(4600), experimental)
+        self.assertIn('over budget', preview_guidance.recommendation(1500, 5, 33000))
+        self.assertIn('within budget', preview_guidance.recommendation(4700, 10, 33000))
+        self.assertIsNone(preview_guidance.guide_for_speed(0))
+        with self.assertRaises(ValueError): experimental.budget(7)
 
 
 class TabTests(unittest.TestCase):
@@ -348,6 +362,49 @@ class TabTests(unittest.TestCase):
         self.root.geometry('800x600'); self.root.update()
         self.tab._render()
         self.assertGreater(self.tab.canvas.winfo_width(), 1)
+
+    def test_popout_native_pixels_survive_window_resize_and_new_frames(self):
+        self.one_frame()
+        original = self.tab.image.tobytes()
+        self.tab.open_popout()
+        popup = self.tab.popout
+        self.root.update()
+        self.assertEqual((popup.photo.width(), popup.photo.height()), (320, 240))
+        photo = popup.photo
+        for geometry in ('1050x800', '360x260', '800x600'):
+            popup.window.geometry(geometry)
+            self.root.update()
+            self.assertIs(popup.photo, photo, 'Resize recreated/resampled the frame')
+            self.assertEqual((photo.width(), photo.height()), (320, 240))
+        self.assertEqual(self.tab.image.tobytes(), original)
+        self.tab.open_popout()
+        self.assertIs(self.tab.popout, popup)
+        self.tab.resolution.set('640x480')
+        self.tab.next_due = 0
+        self.until(lambda: self.tab.frame_count == 2 and not self.tab.busy)
+        self.assertEqual((popup.photo.width(), popup.photo.height()), (640, 480))
+        self.assertEqual(self.tab.image.size, (640, 480))
+        popup.return_to_tab()
+        self.assertIsNone(self.tab.popout)
+        self.assertTrue(self.tab.running)
+        self.assertEqual(self.tab.image.size, (640, 480))
+        self.tab.stop()
+        self.assertEqual(self.port.captures, 2)
+
+    def test_popout_can_open_before_start_and_closes_with_app(self):
+        self.tab.open_popout()
+        popup = self.tab.popout
+        self.assertIsNone(popup.photo)
+        self.assertEqual(self.port.captures, 0)
+        self.assertEqual(len(self.tab.guide.get_children()), 3)
+        for theme in ('light', 'high_contrast', 'dark'):
+            self.app.themes.apply(theme)
+        self.one_frame()
+        self.assertIsNotNone(popup.photo)
+        self.assertIn('Last download', self.tab.advice.get())
+        self.app.on_closing()
+        self.assertTrue(popup.closed)
+        self.assertIsNone(popup.photo)
 
 
 if __name__ == '__main__':
