@@ -139,9 +139,9 @@ class CameraTab(RemoteFilesTab):
     # Metadata diagnostics are best effort. Folder-list RemoteErrors are kept
     # separately from a known capture result. Worker results carry
     # plain data; construction of the Tk viewer is deferred to on_event.
-    def _worker(self, generation, port, cancel, action, path, destination, stats):
+    def _worker(self, generation, port, cancel, action, path, destination, stats, profile='auto'):
         if not action.startswith('camera_'):
-            super()._worker(generation, port, cancel, action, path, destination, stats)
+            super()._worker(generation, port, cancel, action, path, destination, stats, profile)
             return
         result = dict(event='failed', detail='Camera operation did not complete')
         diagnostic = Capture(dict(action=action, path=path,

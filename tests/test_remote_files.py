@@ -351,6 +351,18 @@ class TabTests(unittest.TestCase):
         self.root.update()
         self.assertFalse(self.tab.busy, 'Remote Files worker did not complete')
 
+    def test_transfer_profile_shared_preference_and_worker_capture(self):
+        self.assertIs(self.tab.profile_var, self.app.camera.profile_var)
+        self.tab.profile_var.set(rf.PROFILE_LABELS['legacy'])
+        self.tab._save_profile()
+        self.assertEqual(json.loads(Path('serial_gui_settings.json').read_text())['file_transfer_profile'], 'legacy')
+        self.port.delay = True
+        self.tab._start('download', '/data.bin', self.tmp.name+'/profile.bin')
+        self.assertTrue(self.tab.profile_combo.instate(['disabled']))
+        self.tab.cancel()
+        self.finish()
+        self.assertTrue(self.tab.profile_combo.instate(['readonly']))
+
     def test_delete_rename_confirmation_refresh_and_capability_controls(self):
         self.port.files['/original.txt'] = b'preserve this'
         self.tab.refresh(); self.finish()

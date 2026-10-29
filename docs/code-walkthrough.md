@@ -1,7 +1,8 @@
 # Reading the current GCS code — 2026-10-23
 
-The source comments explain the working implementation. This change does not
-implement the proposed transfer-speed experiments or change radio settings.
+The source comments explain the working implementation. **2026-10-27 update:**
+the speed-test branch now implements negotiated transfer profiles; see
+[transfer-speed tests](transfer-speed.md). Radio settings remain unchanged.
 
 ## Follow one operation
 
@@ -48,7 +49,8 @@ rather than file contents or a complete RF packet trace.
 - `tests/README.md`: executable regression suites, including protocol, lifecycle,
   image, recording and interoperability checks.
 
-The current KFS1 contract still uses one 128-byte file chunk per request/reply
-with hex encoding. Baud rate is UART speed, not measured useful throughput.
+The legacy KFS1 contract uses one 128-byte hex chunk per request/reply. FAST1 adds
+negotiated larger blocks, Base64 and optional two-request batches while retaining
+the legacy commands. Baud rate is UART speed, not measured useful throughput.
 Comments describe invariants and limitations; test simulation does not establish
 physical camera or radio performance.
