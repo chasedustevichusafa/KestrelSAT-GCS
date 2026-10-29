@@ -88,6 +88,7 @@ from . import __version__
 from . import zmodem
 from .remote_tab import RemoteFilesTab
 from .camera_tab import CameraTab
+from .preview_tab import LivePreviewTab
 from .stats_tab import StatisticsTab
 from .transfer_stats import Recorder
 from .xbee_api import ApiSerial, MeteredSerial
@@ -312,6 +313,7 @@ class SerialGUI:
         self.remote_files = RemoteFilesTab(self)
         self.camera = CameraTab(self)
         self.transfer_stats = StatisticsTab(self)
+        self.live_preview = LivePreviewTab(self)
 
         # Plot tabs, plus the '+' that adds another one. Built last so the
         # plot tabs and '+' sit to the right of the fixed tabs.
@@ -1221,6 +1223,7 @@ class SerialGUI:
             self._transfer_thread.join(timeout=2.0)
         self.remote_files.invalidate()
         self.camera.invalidate()
+        self.live_preview.invalidate()
         self.radio_mode_combo.configure(state='readonly')
         self.serial_buffer = ""  # Clear buffer on disconnect
         self.first_line_received = False  # Reset first line flag
@@ -1345,6 +1348,8 @@ class SerialGUI:
                 self.remote_files.on_event(payload)
             elif kind == 'camera':
                 self.camera.on_event(payload)
+            elif kind == 'live_preview':
+                self.live_preview.on_event(payload)
             elif kind == 'stats_combined':
                 self.transfer_stats.on_combined(payload)
             elif kind == 'zmodem':
@@ -2013,8 +2018,9 @@ class SerialGUI:
         try:
             with open(SETTINGS_FILE, 'w') as f:
                 json.dump(data, f, indent=2)
+            return True
         except Exception:
-            pass
+            return False
 
     def save_current_settings(self):
         """Save current connection settings to file"""
@@ -2044,6 +2050,7 @@ class SerialGUI:
             return
 
         self._closing = True
+        self.live_preview.close()
 
         # Cancel the recurring timers first. stop_logging() and disconnect()
         # below both call log_message(), and handle_connection_error() can pop

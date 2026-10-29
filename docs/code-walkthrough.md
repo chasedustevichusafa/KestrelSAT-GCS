@@ -4,6 +4,11 @@ The source comments explain the working implementation. **2026-10-27 update:**
 the speed-test branch now implements negotiated transfer profiles; see
 [transfer-speed tests](transfer-speed.md). Radio settings remain unchanged.
 
+**2026-10-29 update:** `preview.py` owns one capture/download/display/cleanup cycle,
+and `preview_tab.py` coordinates Tk scheduling, display receipts, persisted intent
+and bounded local caching. See [Live Preview](live-preview.md) for recovery and
+measurement semantics. Current camera/file firmware commands are reused.
+
 ## Follow one operation
 
 1. `serial_gui.py` starts `SerialGUI` in `kestrelsat/app.py`. The application owns

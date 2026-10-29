@@ -5,6 +5,8 @@ display. On Linux use `xvfb`; on Windows they run directly.
 
 | file | what it covers | needs a display |
 |---|---|---|
+| `test_live_preview.py` | Frame timing, display/cleanup ownership, changed-file/CRC protection, cancellation, recovery, restart, queue saturation, local cache/Save races, and real Tk/API integration. | yes |
+| `test_preview_firmware.py` | Optional POSIX/C++ preview cycles against the unchanged Lab 8 service. Run separately with `--firmware /path/to/Astro331_Lab8_Code`; needs the sibling firmware sources and host compiler. | no |
 | `test_transfer_speed.py` | Negotiated profiles, binary/tail/empty transfers, batch loss recovery, API fragmentation/RSSI, legacy fallback, CSV profile labels and wire-byte counts. Real firmware interoperability is tested in Lab 8. | no |
 | `test_transfer_stats.py` | Interval rates, stalls, unique-byte accounting, CSV recording, RSSI gaps, and PNG exports. | yes |
 | `test_xbee_api.py` | AP=1 framing, AT/status/data multiplexing, RSSI polling, timeouts, and KFS downloads through a simulated radio. | no |
