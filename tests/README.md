@@ -74,7 +74,7 @@ exercises the actual portable capture job and injected camera/SD failures.
 
 ## Link Tracker — 2026-10-30
 
-`test_link_tracker.py` runs 26 portable core/API and real Tk/Qt regressions, with
+`test_link_tracker.py` runs 27 portable core/API and real Tk/Qt regressions, with
 PNG-export tests. It covers legacy per-packet RSSI without DB queries, modern
 DB rate limiting/failures/ambiguous other-sender reception, source verification,
 probe loss/late/corrupt replies without application retries, skipped schedule

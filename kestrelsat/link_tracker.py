@@ -92,6 +92,7 @@ class Recording:
         self.count = self.successes = self.packet_count = self.measurements = 0
         self.dropped = self.skipped = 0
         self.last_rssi = self.last_rssi_at = None
+        self.rssi_errors, self.last_rssi_error = 0, ''
         self.recent_probes = deque(maxlen=10000)
         self.last_method = 'Waiting for received packets'
         self.status, self.detail, self.ended = 'running', '', None
@@ -117,7 +118,8 @@ class Recording:
                     rssi_direction='satellite to ground', configuration=self.configuration,
                     status=self.status, detail=self.detail, probes=self.count, successes=self.successes,
                     rf_packets=self.packet_count, rssi_measurements=self.measurements,
-                    metadata_drops=self.dropped, skipped_schedule_slots=self.skipped, rows=self.row_counts,
+                    metadata_drops=self.dropped, rssi_errors=self.rssi_errors,
+                    last_rssi_error=self.last_rssi_error, skipped_schedule_slots=self.skipped, rows=self.row_counts,
                     elapsed_s=max(0, (self.ended if self.ended is not None else self.clock())-self.started),
                     ended_utc=None if self.ended is None else self.stamp(self.ended)['utc'])
         path = self.directory/'session.json'
@@ -163,6 +165,10 @@ class Recording:
             if usable:
                 self.measurements += 1
                 self.last_rssi, self.last_rssi_at = value, at
+                self.last_rssi_error = ''
+            if event['event'] == 'rssi_error' or event.get('detail') == 'ambiguous':
+                self.rssi_errors += 1
+                self.last_rssi_error = event.get('detail', '')
             self.last_method = row['method'] or row['detail']
 
     def probe(self, sequence, request, outcome, started, retries, malformed, stale, detail='', received_at=None):
@@ -222,6 +228,7 @@ class Recording:
                         packets=list(self.packets), probe_rows=list(self.probes), events=list(self.events),
                         rssi=self.last_rssi, age=None if self.last_rssi_at is None else self.clock()-self.last_rssi_at,
                         method=self.last_method, dropped=self.dropped, skipped=self.skipped,
+                        rssi_errors=self.rssi_errors, rssi_error=self.last_rssi_error,
                         directory=str(self.directory))
 
     def export(self, path):
@@ -265,7 +272,10 @@ class Tracker:
         for event in events:
             source = event.get('source')
             expected = self.expected_source if self.expected_source is not None else self.port.destination
-            verified = bool(source and expected not in (None, 0, 0xffff) and int(source, 16) == expected)
+            # Explicit MY=0000 is a legal short address. An unset/default zero
+            # destination, however, cannot establish peer identity by itself.
+            verified = bool(source and expected not in (None, 0xffff) and
+                            (self.expected_source is not None or expected != 0) and int(source, 16) == expected)
             record.packet(event, verified)
 
     def _read(self):

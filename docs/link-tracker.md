@@ -72,7 +72,8 @@ RF conditions the achieved rate can be much lower than the requested rate.
 - `DB` is an approximate last-packet register. If reception changes during its
   query, including a filtered other sender, flag the result as ambiguous and
   exclude it from the graph. Do not poll when the most recent packet belongs to
-  a filtered other sender. Keep errors and ambiguous readings in raw logs.
+  a filtered other sender. Keep errors and ambiguous readings in raw logs; cumulative RSSI errors and the
+  last unresolved query error remain visible in the tab.
 - Measurements require a matching source address and fresh, in-session packet
   metadata. Unverified samples remain in raw logs with `valid_sample=False`.
   The displayed last RSSI becomes stale after two seconds; it is never repeated

@@ -126,7 +126,7 @@ class LinkTrackerTab:
             if text and (len(text) > 16 or any(c not in '0123456789abcdef' for c in text)):
                 raise ValueError('Expected source must be a hexadecimal radio address')
             source = int(text, 16) if text else None
-            if source in (0, 0xffff):
+            if source == 0xffff:
                 raise ValueError('Expected source must identify one radio, not a broadcast address')
             configuration = dict(baud=getattr(port, 'baudrate', None), ap=1,
                                  ground_port=getattr(port.port, 'port', None), rf_payload_limit=port.chunk_size,
@@ -304,11 +304,13 @@ class LinkTrackerTab:
             latency = f'{latest["latency_ms"]:.1f} ms' if latest and latest['latency_ms'] != '' else '--'
             last_rf = next((r for r in reversed(snap['packets']) if r['event'] == 'packet'), None)
             source_note = f' | RX 0x{last_rf["frame"]} source {last_rf["source"]}' if last_rf else ''
-            note = ' | Enter expected source if short-address RSSI cannot be verified.' if snap['packets'] and snap['rssi'] is None else ''
+            note = ' | Enter the expected satellite receive source to verify RSSI.' if last_rf and not last_rf['source_verified'] else ''
+            error = ' | RSSI: '+snap['rssi_error'] if snap['rssi_error'] else ''
             self.summary.set(f'{snap["elapsed"]:.1f} s | {signal} | probe success {success} ({snap["successes"]}/{snap["probes"]}) | '
                 f'last latency {latency}\nRequested {snap["requested_hz"]} Hz | achieved {snap["actual_hz"]:.2f} probes/s | '
                 f'verified RSSI {snap["measurement_hz"]:.2f}/s | {snap["method"]} | '
-                f'skipped slots {snap["skipped"]} | metadata lost {snap["dropped"]}{source_note}{note}')
+                f'skipped slots {snap["skipped"]} | metadata lost {snap["dropped"]} | '
+                f'RSSI errors {snap["rssi_errors"]}{source_note}{note}{error}')
         if self.plot is not None:
             if time.monotonic()-self.last_draw >= .5:
                 self._draw(); self.last_draw = time.monotonic()

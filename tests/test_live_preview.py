@@ -173,6 +173,7 @@ class CycleTests(unittest.TestCase):
         self.assertIs(preview_guidance.guide_for_speed(4600), experimental)
         self.assertIn('over budget', preview_guidance.recommendation(1500, 5, 33000))
         self.assertIn('within budget', preview_guidance.recommendation(4700, 10, 33000))
+        self.assertIn('unavailable', preview_guidance.recommendation(0, 5, 33000))
         self.assertIsNone(preview_guidance.guide_for_speed(0))
         with self.assertRaises(ValueError): experimental.budget(7)
 

@@ -88,6 +88,18 @@ class TrackerTests(unittest.TestCase):
         self.assertTrue(all(not r['source_verified'] for r in record.packets))
         self.assertTrue(all(not math.isfinite(v) for v in graph_data(record.snapshot())['raw']))
 
+    def test_explicit_zero_short_address_is_legal_and_verifiable(self):
+        raw, port = self.connect(peer=False)
+        record = link.Recording(self.folder, 'MY zero', 2, 1)
+        tracker = link.Tracker(port, record, threading.Event(), expected_source=0)
+        port.begin_rssi_capture(tracker)
+        raw.enqueue(b'\x81\x00\x00\x37\x00payload')
+        self.wait(lambda: port._packet_number == 1)
+        tracker._metadata(end=True)
+        self.assertEqual(record.last_rssi, -55)
+        self.assertTrue(record.packets[-1]['source_verified'])
+        record.finish()
+
     def test_modern_db_fallback_fresh_only_and_rate_capped(self):
         raw, port = self.connect(format='modern')
         record, cancel, worker = self.start(port, rate=10)
@@ -108,6 +120,8 @@ class TrackerTests(unittest.TestCase):
         self.assertEqual(record.successes, record.count)
         self.assertIsNone(record.last_rssi)
         self.assertEqual(record.status, 'stopped')
+        self.assertGreater(record.snapshot()['rssi_errors'], 0)
+        self.assertIn('failed', record.snapshot()['rssi_error'])
 
     def test_other_sender_during_db_query_marks_measurement_ambiguous(self):
         raw, port = self.connect(format='modern')
