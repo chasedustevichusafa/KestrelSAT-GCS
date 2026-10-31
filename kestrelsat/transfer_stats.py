@@ -284,7 +284,12 @@ class Recorder:
     # have dropped old samples, so they cannot substitute for durable source CSVs.
     def combine(self, sessions, name):
         """Stream full CSVs from finished transfers in this process, preserving gaps."""
-        sessions = sorted(set(sessions), key=lambda item: item.started)
+        # Several short transfers can share one monotonic clock tick, especially
+        # on Windows. Keep selection order for tied starts: converting to a set
+        # first would randomize those ties and reverse operations in the CSV.
+        # dict removes duplicate selections while preserving their first position;
+        # Python's stable sort still orders distinct start times chronologically.
+        sessions = sorted(dict.fromkeys(sessions), key=lambda item: item.started)
         if len(sessions) < 2:
             raise ValueError('Select at least two finished transfers')
         snapshots = [session.snapshot() for session in sessions]
