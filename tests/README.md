@@ -71,3 +71,16 @@ disconnect recovery without recapture, statistics, missing/old firmware and lega
 API frames with one raw reader. Each Tk case collects prior test interpreters on
 the main thread before starting new workers. Lab 8's host/PTY suite separately
 exercises the actual portable capture job and injected camera/SD failures.
+
+## Link Tracker — 2026-10-30
+
+`test_link_tracker.py` runs 26 portable core/API and real Tk/Qt regressions, with
+PNG-export tests. It covers legacy per-packet RSSI without DB queries, modern
+DB rate limiting/failures/ambiguous other-sender reception, source verification,
+probe loss/late/corrupt replies without application retries, skipped schedule
+slots, cancellation, transport/disk failures, bounded metadata and graph history,
+complete CSV/ZIP logs, atomic export failures, a simulated hour at 10 Hz beyond
+the in-memory history limit, smoothing gaps, distance markers, serial exclusion,
+transfer-poller coordination, disconnect/reconnect and shutdown. The full runner
+and Windows artifact builds include this suite. Fixtures verify semantics, not
+physical XBee range, signal calibration or an achieved hardware sampling rate.

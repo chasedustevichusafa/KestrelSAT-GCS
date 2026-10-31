@@ -307,6 +307,10 @@ class GraphTests(unittest.TestCase):
                 app = SerialGUI(root)
                 recording = app.transfer_recorder.start_recording('Real API operations')
                 raw = Radio(SatellitePort())
+                # Packet RSSI is exact even during continuous file replies.
+                # DB fallback/association races are covered by Link Tracker and
+                # API tests; a fast transfer need not contain an unambiguous DB.
+                raw.receive_format = 'legacy64'
                 raw.delay = 0.15
                 app.port_var.set('FAKE-XBEE')
                 app.radio_mode_var.set('XBee API (AP=1)')

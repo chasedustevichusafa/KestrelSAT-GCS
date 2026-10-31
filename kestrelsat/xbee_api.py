@@ -20,6 +20,7 @@ are used here. Local AP/DH/DL/NP queries use API AT frames only.
 # not write radio settings or change network/baud configuration. Unicast with
 # MAC ACKs and broadcast have different delivery guarantees; this parser alone
 # cannot supply receiver acknowledgments for a broadcast transmission.
+import collections
 import threading
 import time
 import serial
@@ -141,6 +142,14 @@ class ApiSerial:
         self._filtered_packets = 0
         self._last_delivery = None
         self._rssi_error = 'No RSSI reading yet'
+        self._rssi_source = None
+        self._last_rf_meta = {}
+        self._rf_generation = self._last_rf_generation = 0
+        # Optional metadata tap, drained by Link Tracker rather than by Tk or
+        # disk I/O on this sole API reader. Overflow is counted, never silent.
+        self._rssi_capture = None
+        self._rssi_events = collections.deque(maxlen=4096)
+        self._rssi_dropped = 0
         self._transfer_cancel = None
         self.destination = None
         self.chunk_size = 64
@@ -257,6 +266,10 @@ class ApiSerial:
             # The course's XB3-24A 2014 profile defaults to AO=2, which
             # outputs legacy 802.15.4 receive frames even with AP=1.
             header = {0x80: 11, 0x81: 5, 0x90: 12, 0x91: 18}.get(kind)
+            if header is not None:
+                # DB belongs to the last received radio packet, including a
+                # different sender that we subsequently filter out of payload.
+                self._rf_generation += 1
             if header is not None and len(packet) >= header:
                 if kind == 0x81:
                     source = int.from_bytes(packet[1:3], 'big')
@@ -280,6 +293,20 @@ class ApiSerial:
                 self._payload.extend(data)
                 self._packet_at = time.monotonic()
                 self._packet_number += 1
+                self._last_rf_generation = self._rf_generation
+                embedded = packet[9] if kind == 0x80 else packet[3] if kind == 0x81 else None
+                rssi = -embedded if embedded is not None and 1 <= embedded <= 127 else None
+                self._rssi_source = 'packet' if embedded is not None else 'DB'
+                if embedded is not None:
+                    self._rssi, self._rssi_at = rssi, self._packet_at if rssi is not None else None
+                    self._rssi_error = '' if rssi is not None else 'Invalid embedded RSSI'
+                metadata = dict(event='packet', at=self._packet_at,
+                    packet=self._packet_number, source=f'{source:04x}' if kind == 0x81 else f'{source:016x}',
+                    address_bits=16 if kind == 0x81 else 64, frame=f'{kind:02x}',
+                    rssi=rssi, method='packet' if embedded is not None else 'DB pending',
+                    packet_at=self._packet_at, detail='')
+                self._last_rf_meta = metadata
+                self._capture_rssi(metadata)
             elif kind in (0x88, 0x8b) and len(packet) >= (5 if kind == 0x88 else 7):
                 pending = self._pending.get(packet[1])
                 if pending and pending['expected'] == kind:
@@ -318,7 +345,10 @@ class ApiSerial:
             now = time.monotonic()
             with self._condition:
                 packet_number = self._packet_number
-            if not self._poll_enabled.is_set() or not packet_number or packet_number == sampled or now < next_poll:
+                embedded = self._rssi_source == 'packet'
+                generation = self._rf_generation
+                latest_peer = generation == self._last_rf_generation
+            if not self._poll_enabled.is_set() or embedded or not latest_peer or not packet_number or packet_number == sampled or now < next_poll:
                 continue
             next_poll = now+1
             try:
@@ -326,12 +356,51 @@ class ApiSerial:
                 if len(value) != 1 or not 1 <= value[0] <= 127:
                     raise serial.SerialException('XBee DB reading unavailable')
                 with self._condition:
-                    self._rssi, self._rssi_at = -value[0], time.monotonic()
-                    self._rssi_error = ''
+                    # DB is a last-packet register, not a timestamped per-packet
+                    # measurement. Flag reception during the query as ambiguous;
+                    # never overwrite a newer embedded measurement with it.
+                    at = time.monotonic()
+                    if self._rssi_source != 'packet':
+                        ambiguous = generation != self._rf_generation
+                        if not ambiguous:
+                            self._rssi, self._rssi_at = -value[0], at
+                            self._rssi_error = ''
+                        else:
+                            self._rssi_error = 'Reception changed during DB query; RSSI association ambiguous'
+                        self._capture_rssi(dict(self._last_rf_meta, event='rssi', at=at,
+                            rssi=-value[0], method='DB', detail='ambiguous' if ambiguous else 'last-packet register'))
                 sampled = packet_number
             except serial.SerialException as exc:
+                sampled = packet_number # Retry only after another RF packet.
                 with self._condition:
                     self._rssi_error = str(exc)
+                    self._capture_rssi(dict(event='rssi_error', at=time.monotonic(), detail=str(exc)))
+
+    def _capture_rssi(self, event):
+        """Called under _condition; metadata only, no user callbacks or disk I/O."""
+        if self._rssi_capture is not None:
+            if len(self._rssi_events) == self._rssi_events.maxlen:
+                self._rssi_dropped += 1
+            self._rssi_events.append(event)
+
+    def begin_rssi_capture(self, owner):
+        with self._condition:
+            if self._rssi_capture is not None:
+                raise RuntimeError('RSSI capture already owned')
+            self._rssi_capture = owner
+            self._rssi_events.clear()
+            self._rssi_dropped = 0
+
+    def drain_rssi_capture(self, owner, end=False):
+        with self._condition:
+            if self._rssi_capture is not owner:
+                return [], 0
+            events = list(self._rssi_events)
+            self._rssi_events.clear()
+            dropped, self._rssi_dropped = self._rssi_dropped, 0
+            if end:
+                self._rssi_capture = None
+            return events, dropped
 
     def set_rssi_polling(self, enabled):
         if enabled:
