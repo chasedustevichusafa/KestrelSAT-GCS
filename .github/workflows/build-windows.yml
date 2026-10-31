@@ -3,7 +3,7 @@ name: Windows test build
 on:
   workflow_dispatch:
   push:
-    branches: ['main', 'feature/remote-files', 'feature/transfer-statistics', 'fix/file-transfer-stability', 'feature/remote-upload', 'feature/remote-file-management', 'feature/multi-operation-recordings', 'feature/remote-camera', 'docs/code-walkthrough', 'feature/transfer-speed']
+    branches: ['main', 'feature/remote-files', 'feature/transfer-statistics', 'fix/file-transfer-stability', 'feature/remote-upload', 'feature/remote-file-management', 'feature/multi-operation-recordings', 'feature/remote-camera', 'docs/code-walkthrough', 'feature/transfer-speed', 'feature/live-camera-preview']
   pull_request:
     paths:
       - 'README.md'
@@ -39,6 +39,8 @@ jobs:
           python tests/test_remote_files.py
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python tests/test_transfer_speed.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python tests/test_live_preview.py
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python tests/test_camera.py
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

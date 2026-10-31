@@ -440,11 +440,16 @@ class Client:
     # reconcile the outcome. An unconfirmed result is reported as uncertainty;
     # it must not be converted into a new operation that could affect another
     # file appearing under the old name after the first mutation.
-    def _manage(self, op, *args):
+    def _manage(self, op, *args, before_send=None):
         if 'MANAGE1' not in self.capabilities():
             raise RemoteError('Satellite firmware needs the delete/rename update')
         request_id = f'{(self._id+1) & 0xffffffff:08x}'
         expected = 'DELETED' if op == 'DELETE' else 'RENAMED'
+        # Preview persists this exact mutation ID before DELETE can reach the
+        # radio. A restart can query RESULT instead of blindly issuing a new
+        # destructive command. A failed checkpoint must prevent the send.
+        if before_send is not None:
+            before_send(request_id)
         try:
             if self.request(op, *args, expected={expected}) != [expected]:
                 raise RemoteError('Unexpected file operation reply')
@@ -459,8 +464,8 @@ class Client:
             raise OperationUncertain(f'{op.title()} completion could not be confirmed. '
                 'Refresh the folder before trying again. '+str(exc)) from exc
 
-    def delete_file(self, path):
-        self._manage('DELETE', upload_path_hex(path, temporary=False))
+    def delete_file(self, path, before_send=None):
+        self._manage('DELETE', upload_path_hex(path, temporary=False), before_send=before_send)
 
     def rename_file(self, path, target):
         encoded = upload_path_hex(path, temporary=False)

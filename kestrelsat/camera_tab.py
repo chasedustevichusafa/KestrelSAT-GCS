@@ -87,6 +87,9 @@ class CameraTab(RemoteFilesTab):
     def capture_selected(self):
         if not self._ready():
             return
+        preview = getattr(self.app, 'live_preview', None)
+        if preview is not None and (preview.pending or preview.invalid_pending):
+            self.status.set('Resolve the pending frame on Live Preview before taking another image.'); return
         if self.pending:
             self.status.set('Use Check capture to resolve the previous job first.'); return
         if not self.info or not self.info.ready or not self.info.sd_ready:

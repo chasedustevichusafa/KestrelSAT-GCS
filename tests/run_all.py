@@ -15,6 +15,7 @@ SUITES = [
     "test_remote_files.py",
     "test_transfer_speed.py",
     "test_camera.py",
+    "test_live_preview.py",
     "test_transfer_stats.py",
     "test_xbee_api.py",
     "test_correctness.py",
