@@ -39,7 +39,10 @@ def guide_for_speed(speed):
 def recommendation(speed, interval, size):
     row = guide_for_speed(speed)
     if row is None:
-        return 'Recommendations use approximate measured speeds; start preview to see current performance.'
+        # A fast mock/small transfer can finish within one Windows clock tick.
+        # There is no defensible B/s estimate in that case; do not invent one
+        # or tell an already-running preview to start again.
+        return 'Last download speed unavailable (duration below clock resolution). Use the approximate starting guide.'
     budget = int(max(0, interval-OVERHEAD_SECONDS)*speed)
     suggestion = row.resolution_5s if interval == 5 else row.resolution_10s
     fits = 'within budget' if size <= budget else 'over budget; lower resolution or choose 10 s'

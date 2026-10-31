@@ -36,6 +36,24 @@ interactive rendering of live data.
 - **Resize-safe**: a minimum window size plus scrollable panels, so no control
   can be pushed out of reach; Send Data and the monitor controls always stay visible
 
+## Dedicated Link Tracker (2026-10-30)
+
+The **Link Tracker** tab records RSSI and round-trip reliability without file
+transfers or firmware changes. Choose 1/2/5 probes per second (10 Hz experimental),
+then Start tracking. Packet RSSI avoids DB polling on legacy API frames; other
+formats use a fresh-packet DB fallback near 1 Hz. Resizable graphs show RSSI,
+success, latency and optional distance checkpoints. Raw CSV logging, PNG exports
+and a complete CSV bundle support long range tests. Start with 2 Hz using your
+working API/unicast setup. See [Link Tracker](docs/link-tracker.md) for source
+verification, freshness, sampling limits and the test procedure.
+
+## Combined transfer ordering fix (2026-10-30)
+
+Combined CSV exports now preserve the selected order when short transfers share
+the same clock tick, while still sorting distinct start times chronologically
+and removing duplicate selections. This also fixes an intermittent Windows build
+test failure caused by unordered ties.
+
 ## Transfer statistics and RSSI (2026-10-20)
 
 The **Transfer Stats** tab records live download/upload rates for file transfers,

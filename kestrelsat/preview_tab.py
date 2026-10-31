@@ -203,6 +203,9 @@ class LivePreviewTab:
         self._controls()
 
     def _ready(self):
+        tracker = getattr(self.app, 'link_tracker', None)
+        if tracker is not None and tracker.busy:
+            self.status.set('Stop Link Tracker before starting camera preview.'); return False
         if not self.app.is_connected or self.app.serial_connection is None:
             self.status.set('Connect to the ground radio first.'); return False
         if self.app.test_mode:

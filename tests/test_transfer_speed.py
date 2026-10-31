@@ -199,7 +199,9 @@ class TransferSpeedTests(unittest.TestCase):
                         port.close()
 
     def test_actual_profile_is_preserved_in_session_recording_and_combined_csv(self):
-        recorder = Recorder(self.root/'stats')
+        # Force both transfers into the same clock tick, as can happen on Windows.
+        # Combined CSVs must preserve their supplied order even when times tie.
+        recorder = Recorder(self.root/'stats', clock=lambda: 1000.0)
         recording = recorder.start_recording('profiles')
         sessions = []
         for profile in ('legacy', 'batch2'):
@@ -215,7 +217,7 @@ class TransferSpeedTests(unittest.TestCase):
         with recording.operations_path.open() as handle:
             operations = list(csv.DictReader(handle))
         self.assertEqual([op['transfer_profile'] for op in operations], ['128-HEX-batch1', '512-B64-batch2'])
-        combined = recorder.combine(sessions, 'combined')
+        combined = recorder.combine([*sessions, sessions[0]], 'combined')
         with combined.operations_path.open() as handle:
             self.assertEqual([op['transfer_profile'] for op in csv.DictReader(handle)],
                              ['128-HEX-batch1', '512-B64-batch2'])
