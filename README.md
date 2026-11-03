@@ -36,6 +36,13 @@ interactive rendering of live data.
 - **Resize-safe**: a minimum window size plus scrollable panels, so no control
   can be pushed out of reach; Send Data and the monitor controls always stay visible
 
+## Combined transfer ordering fix (2026-10-30)
+
+Combined CSV exports now preserve the selected order when short transfers share
+the same clock tick, while still sorting distinct start times chronologically
+and removing duplicate selections. This also fixes an intermittent Windows build
+test failure caused by unordered ties.
+
 ## Transfer statistics and RSSI (2026-10-20)
 
 The **Transfer Stats** tab records live download/upload rates for file transfers,
