@@ -3,6 +3,7 @@ import copy
 import os
 from pathlib import Path
 import sys
+import subprocess
 import tempfile
 import tkinter as tk
 import unittest
@@ -198,14 +199,47 @@ class FormattingTests(unittest.TestCase):
     def test_background_and_overlay_persist_across_application_restart(self):
         self.background('black'); self.overlay(True)
         self.app.on_closing()
-        root = tk.Tk(); app = SerialGUI(root); self.addCleanup(app.on_closing)
-        self.assertEqual(app.graph_background,'black')
-        self.assertTrue(app.transfer_stats.overlay_rssi.get())
-        self.assertTrue(app.transfer_stats.show_graphs())
-        app.qt_app.processEvents()
-        self.assertTrue(app.transfer_stats._overlay_enabled)
-        self.assertEqual(app.transfer_stats.window.backgroundBrush().color().name(),'#000000')
+        # A real restart has a fresh Tcl interpreter AND a fresh QApplication.
+        # Reusing both native GUI libraries across destroyed Tk roots can crash
+        # Python on Windows during later ThemeChanged/garbage-collection work.
+        repo = str(Path(__file__).resolve().parents[1])
+        script = f"""import sys
+sys.path.insert(0, {repo!r})
+import tkinter as tk
+from kestrelsat.app import SerialGUI
+root = tk.Tk()
+app = SerialGUI(root)
+try:
+    assert app.graph_background == 'black'
+    assert app.transfer_stats.overlay_rssi.get()
+    assert app.transfer_stats.show_graphs()
+    app.qt_app.processEvents()
+    assert app.transfer_stats._overlay_enabled
+    assert app.transfer_stats.window.backgroundBrush().color().name() == '#000000'
+finally:
+    app.on_closing()
+"""
+        result = subprocess.run([sys.executable, '-c', script], capture_output=True, text=True, timeout=60)
+        self.assertEqual(result.returncode, 0, result.stdout+'\n'+result.stderr)
+
 
 
 if __name__ == '__main__':
-    unittest.main()
+    if len(sys.argv) > 1:
+        unittest.main()
+    else:
+        # Standalone executable suite, like run_all.py. Each case exercises one
+        # actual desktop instance; do not retain old Tcl/Qt native state between
+        # cases. Failures still propagate without retries or skipped assertions.
+        names = unittest.defaultTestLoader.getTestCaseNames(FormattingTests)
+        failed = []
+        for name in names:
+            print('Graph formatting: '+name, flush=True)
+            result = subprocess.run([sys.executable, str(Path(__file__).resolve()),
+                                     'FormattingTests.'+name])
+            if result.returncode:
+                failed.append(name)
+        if failed:
+            print('FAILED: '+', '.join(failed))
+            sys.exit(1)
+        print(f'All {len(names)} graph formatting cases passed.')

@@ -94,3 +94,7 @@ measurements/CSV bytes, missing-RSSI gaps, resize/zoom linkage, restored layout
 and ranges after failed exports, and real PNG pixels proving both backgrounds
 and an actual RSSI curve (beyond the legend) in combined/rate/standalone images.
 The full runner and Windows artifact workflow run this suite.
+
+Each formatting GUI case starts in a fresh process, and the restart check uses
+a second process. This avoids retaining destroyed Tcl interpreters alongside a
+shared QApplication on Windows; assertions still run once and failures propagate.
