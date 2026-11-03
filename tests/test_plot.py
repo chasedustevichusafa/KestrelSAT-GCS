@@ -8,6 +8,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import tkinter as tk
 import kestrelsat.app as sg
+from kestrelsat import graph_style
 
 assert sg.PYQTGRAPH_AVAILABLE, "pyqtgraph must be importable for this test"
 import pyqtgraph as pg
@@ -32,7 +33,7 @@ print("plot window opened; curves =", sorted(app.plots[0].channels))
 
 
 def check(theme_name):
-    c = sg.THEMES[theme_name]
+    c = graph_style.colors(app, sg.THEMES[theme_name])
     bg = app.plots[0].plot_widget.backgroundBrush().color().name().lower()
     assert bg == c["plot_bg"].lower(), (theme_name, bg, c["plot_bg"])
     for axis_name in ("left", "bottom"):
@@ -92,7 +93,7 @@ root.update()
 for n in range(3):
     app.plots[0].update_plot_channels({"Alpha": n}, n)
 root.update()
-assert app.plots[0].channels["Alpha"].color == sg.THEMES["high_contrast"]["plot_palette"][0]
+assert app.plots[0].channels["Alpha"].color == graph_style.colors(app)["plot_palette"][0]
 print("clear + re-detect ok:", {k: v.color for k, v in app.plots[0].channels.items()})
 
 app.on_closing()

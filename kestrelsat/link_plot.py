@@ -5,7 +5,7 @@ import html
 import math
 import statistics
 
-from . import themes, scaling
+from . import themes, scaling, graph_style
 
 
 def graph_data(snapshot):
@@ -123,6 +123,7 @@ class LinkPlot:
 
     def theme(self, colors):
         import pyqtgraph as pg
+        colors = graph_style.colors(self.tab.app, colors)
         self.window.setBackground(colors['plot_bg'])
         palette = colors['plot_palette']
         for curve, color in ((self.raw, palette[0]), (self.median, palette[1]),
@@ -133,9 +134,8 @@ class LinkPlot:
         self.low.setPen(None); self.high.setPen(None)
         color = pg.mkColor(palette[1]); color.setAlpha(45); self.band.setBrush(color)
         for plot in (self.rssi, self.success, self.latency, self.distance):
-            for axis in ('left', 'bottom'):
-                plot.getAxis(axis).setPen(colors['plot_fg'])
-                plot.getAxis(axis).setTextPen(colors['plot_fg'])
+            graph_style.theme_plot(plot, colors)
+        self.header.setText(self.header.text, color=colors['plot_fg'])
 
     def draw(self, snapshot, mode, smooth=True):
         import pyqtgraph as pg
@@ -156,8 +156,8 @@ class LinkPlot:
             if event['event'] != 'marker':
                 continue
             marker = pg.InfiniteLine(float(event['elapsed_s']), angle=90,
-                label=event['detail'][:30], labelOpts={'position': .9, 'color': themes.CURRENT['plot_fg']},
-                pen=pg.mkPen(themes.CURRENT['plot_fg'], style=2))
+                label=event['detail'][:30], labelOpts={'position': .9, 'color': graph_style.colors(self.tab.app)['plot_fg']},
+                pen=pg.mkPen(graph_style.colors(self.tab.app)['plot_fg'], style=2))
             self.rssi.addItem(marker); self.markers.append(marker)
         elapsed = max(1, snapshot['elapsed'])
         if mode.startswith('Last'):
@@ -174,7 +174,7 @@ class LinkPlot:
                    'satellite → ground; missing RSSI is a gap')
         if snapshot.get('decimated'):
             caption += ' | full-session envelope; smoothing hidden'
-        self.header.setText(html.escape(caption), color=themes.CURRENT['plot_fg'])
+        self.header.setText(html.escape(caption), color=graph_style.colors(self.tab.app)['plot_fg'])
 
     def save(self, path, target):
         import pyqtgraph.exporters

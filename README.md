@@ -36,6 +36,15 @@ interactive rendering of live data.
 - **Resize-safe**: a minimum window size plus scrollable panels, so no control
   can be pushed out of reach; Send Data and the monitor controls always stay visible
 
+## Graph formatting (2026-11-03)
+
+All graphs default to white. Choose **Options → Graph Background → White / Black**
+(or Preferences) to change graph backgrounds independently of the main UI theme.
+Telemetry, Transfer Stats, Link Tracker and PNG exports follow this preference.
+Transfer Stats also offers **Overlay RSSI on speed graph (right dBm axis)**,
+with shared time, independent rate/dBm scales and preserved missing-data gaps.
+See [Graph formatting](docs/graph-formatting.md) for export behavior.
+
 ## Dedicated Link Tracker (2026-10-30)
 
 The **Link Tracker** tab records RSSI and round-trip reliability without file

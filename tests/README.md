@@ -84,3 +84,13 @@ the in-memory history limit, smoothing gaps, distance markers, serial exclusion,
 transfer-poller coordination, disconnect/reconnect and shutdown. The full runner
 and Windows artifact builds include this suite. Fixtures verify semantics, not
 physical XBee range, signal calibration or an achieved hardware sampling rate.
+
+## Graph formatting — 2026-11-03
+
+`test_graph_formatting.py` covers white defaults and persistent black/white
+selection independent of UI themes, readable open/reopened telemetry/statistics/
+link graphs, preserved custom channel colours, dual-axis units, identical raw
+measurements/CSV bytes, missing-RSSI gaps, resize/zoom linkage, restored layout
+and ranges after failed exports, and real PNG pixels proving both backgrounds
+and an actual RSSI curve (beyond the legend) in combined/rate/standalone images.
+The full runner and Windows artifact workflow run this suite.

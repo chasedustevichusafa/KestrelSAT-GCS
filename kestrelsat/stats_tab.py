@@ -17,7 +17,7 @@ import threading
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox, simpledialog
 
-from . import themes, scaling
+from . import themes, scaling, graph_style
 from .widgets import ScrollableFrame
 
 
@@ -33,6 +33,9 @@ class StatisticsTab:
         self._sessions = {}
         self._plot_key = None
         self._markers = []
+        self.overlay_view = self.overlay_curve = None
+        self._overlay_enabled = False
+        self.overlay_rssi = tk.BooleanVar(value=bool(app.settings.get('transfer_rssi_overlay', False)))
         self.selection = tk.StringVar()
         self.summary = tk.StringVar(value='Transfers are recorded individually. Start a named recording to capture multiple operations and idle gaps.')
         self.rssi_enabled = tk.BooleanVar(value=bool(app.settings.get('transfer_rssi', True)))
@@ -73,6 +76,8 @@ class StatisticsTab:
         ttk.Label(scope, text='PNG time range:').pack(side=tk.LEFT)
         ttk.Combobox(scope, textvariable=self.png_extent, state='readonly', width=16,
                      values=('Full timeline', 'Current view')).pack(side=tk.LEFT, padx=6)
+        ttk.Checkbutton(self.body, text='Overlay RSSI on speed graph (right dBm axis)',
+                        variable=self.overlay_rssi, command=self._overlay_changed).pack(anchor=tk.W, pady=(8, 0))
         ttk.Checkbutton(self.body, text='Record ground receiver RSSI during transfers (API mode only)',
                         variable=self.rssi_enabled, command=self._rssi_changed).pack(anchor=tk.W, pady=(12, 6))
         self.summary_label = ttk.Label(self.body, textvariable=self.summary, wraplength=540, justify=tk.LEFT)
@@ -280,9 +285,18 @@ class StatisticsTab:
             import pyqtgraph as pg
             owner = self
             class Window(pg.GraphicsLayoutWidget):
+                def close(self):
+                    # GraphicsView.close clears the C++ scene BEFORE closeEvent.
+                    # Disconnect/remove the sibling ViewBox while it is alive.
+                    if owner.window is self:
+                        owner._dispose_overlay()
+                    return super().close()
+
                 def closeEvent(self, event):
-                    owner.window = None
-                    owner._plot_key = None
+                    if owner.window is self:
+                        owner._dispose_overlay()
+                        owner.window = None
+                        owner._plot_key = None
                     super().closeEvent(event)
             self._markers = []
             self.window = Window()
@@ -300,17 +314,90 @@ class StatisticsTab:
             self.rssi_plot.setLabel('bottom', 'Elapsed time', units='s')
             self.rssi_plot.setXLink(self.rate_plot)
             self.rssi_curve = self.rssi_plot.plot(connect='finite', symbol='o', symbolSize=4)
+            self._create_overlay()
             self._theme(themes.CURRENT)
+            self._apply_overlay(self.overlay_rssi.get())
         self._refresh()
         self.window.show()
         self.app.qt_app.processEvents()
         return True
+
+    def _create_overlay(self):
+        """A second Y view shares time but never mixes dBm with the B/s scale."""
+        import pyqtgraph as pg
+        from PyQt5 import QtCore
+        self.overlay_view = pg.ViewBox(enableMenu=False)
+        self.overlay_view.setMouseEnabled(x=False, y=False)
+        self.overlay_view.setAcceptedMouseButtons(QtCore.Qt.NoButton)
+        self.overlay_view.setAcceptHoverEvents(False)
+        self.overlay_view.setZValue(-1)
+        self.rate_plot.scene().addItem(self.overlay_view)
+        self.rate_plot.getAxis('right').linkToView(self.overlay_view)
+        self.rate_plot.getAxis('right').setLabel('RSSI', units='dBm')
+        self.overlay_view.setXLink(self.rate_plot)
+        self.overlay_curve = pg.PlotDataItem(connect='finite', symbol='o', symbolSize=4)
+        self.overlay_view.addItem(self.overlay_curve)
+        self.rate_plot.getViewBox().sigResized.connect(self._sync_overlay)
+        self._overlay_enabled = False
+        self.overlay_view.hide()
+        self.rate_plot.hideAxis('right')
+        self._sync_overlay()
+
+    def _sync_overlay(self):
+        if self.overlay_view is not None:
+            import pyqtgraph as pg
+            view = self.rate_plot.getViewBox()
+            self.overlay_view.setGeometry(view.sceneBoundingRect())
+            self.overlay_view.linkedViewChanged(view, pg.ViewBox.XAxis)
+
+    def _apply_overlay(self, enabled):
+        """Presentation only. Keep both curves' data for standalone RSSI exports."""
+        if self.window is None or bool(enabled) == self._overlay_enabled:
+            return
+        self._overlay_enabled = bool(enabled)
+        if enabled:
+            self.window.ci.removeItem(self.rssi_plot)
+            self.rssi_plot.hide()
+            self.rate_plot.showAxis('right')
+            self.overlay_view.show()
+            self.rate_plot.legend.addItem(self.overlay_curve, 'RSSI (right axis)')
+        else:
+            self.overlay_view.hide()
+            self.rate_plot.hideAxis('right')
+            self.window.ci.addItem(self.rssi_plot, row=2, col=0)
+            self.rssi_plot.show()
+            self.rate_plot.legend.removeItem(self.overlay_curve)
+        self._sync_overlay()
+        self._theme(self.app.themes.colors)
+
+    def _overlay_changed(self):
+        self.app._write_settings({'transfer_rssi_overlay': bool(self.overlay_rssi.get())})
+        self._apply_overlay(self.overlay_rssi.get())
+        self._plot_key = None
+        self._refresh()
+
+    def _dispose_overlay(self):
+        # Remove the scene sibling and resize signal when its window closes;
+        # reopening must create one fresh ViewBox, not accumulate old views.
+        if self.overlay_view is not None:
+            self.rate_plot.getViewBox().sigResized.disconnect(self._sync_overlay)
+            scene = self.overlay_view.scene()
+            self.overlay_view.close()
+            if scene is not None:
+                scene.removeItem(self.overlay_view)
+            self.overlay_view = self.overlay_curve = None
+        # A detached standalone RSSI panel is not owned by the window layout.
+        if self._overlay_enabled:
+            self.window.ci.addItem(self.rssi_plot, row=2, col=0)
+            self.rssi_plot.show()
+        self._overlay_enabled = False
 
     def _theme(self, colors):
         self.scroll.canvas.configure(background=colors['surface'])
         if self.window is None:
             return
         import pyqtgraph as pg
+        colors = graph_style.colors(self.app, colors)
         self.window.setBackground(colors['plot_bg'])
         self.header.setText(self.header.text, color=colors['plot_fg'])
         palette = colors['plot_palette']
@@ -319,15 +406,13 @@ class StatisticsTab:
         self.rssi_curve.setPen(pg.mkPen(palette[2], width=2))
         self.rssi_curve.setSymbolBrush(palette[2])
         self.rssi_curve.setSymbolPen(palette[2])
+        self.overlay_curve.setPen(pg.mkPen(palette[2], width=2, style=2))
+        self.overlay_curve.setSymbolBrush(palette[2]); self.overlay_curve.setSymbolPen(palette[2])
         for plot in (self.rate_plot, self.rssi_plot):
-            plot.showGrid(x=True, y=True, alpha=colors['plot_grid_alpha'])
-            for name in ('left', 'bottom'):
-                plot.getAxis(name).setPen(colors['plot_fg'])
-                plot.getAxis(name).setTextPen(colors['plot_fg'])
-            plot.titleLabel.setText(plot.titleLabel.text, color=colors['plot_fg'])
+            graph_style.theme_plot(plot, colors)
         for _, marker in self._markers:
             marker.setPen(pg.mkPen(colors['plot_fg'], width=1, style=2))
-            if marker.label:
+            if getattr(marker, 'label', None) is not None:
                 marker.label.setColor(colors['plot_fg'])
         if self.rate_plot.legend:
             self.rate_plot.legend.setLabelTextColor(colors['plot_fg'])
@@ -344,8 +429,12 @@ class StatisticsTab:
         self.upload_curve.setData(x, [s['upload_Bps'] for s in samples])
         rssi = [s['rssi_dBm'] if s['rssi_dBm'] is not None else math.nan for s in samples]
         has_rssi = any(math.isfinite(value) for value in rssi)
+        self.overlay_curve.setData(x if has_rssi else [], rssi if has_rssi else [], connect='finite')
+        self.rate_plot.setTitle('Useful file transfer rate' +
+            (' + ground RSSI' + ('' if has_rssi else ' (no fresh measurements)') if self._overlay_enabled else ''),
+            color=graph_style.colors(self.app)['plot_fg'])
         self.rssi_plot.setTitle('Ground receiver RSSI (last RF packet)' if has_rssi else
-                                'Ground receiver RSSI (no fresh measurements)')
+                                'Ground receiver RSSI (no fresh measurements)', color=graph_style.colors(self.app)['plot_fg'])
         if has_rssi:
             self.rssi_curve.setData(x, rssi, connect='finite')
         else:
@@ -365,8 +454,8 @@ class StatisticsTab:
                     label = 'Start: '+event['detail'].rsplit('/', 1)[-1][:24]
                     labelled += 1
                 marker = pg.InfiniteLine(event['elapsed_s'], angle=90, movable=False, label=label,
-                                         labelOpts={'position': 0.95, 'color': themes.CURRENT['plot_fg']},
-                                         pen=pg.mkPen(themes.CURRENT['plot_fg'], width=1, style=2))
+                                         labelOpts={'position': 0.95, 'color': graph_style.colors(self.app)['plot_fg']},
+                                         pen=pg.mkPen(graph_style.colors(self.app)['plot_fg'], width=1, style=2))
                 marker.setToolTip(detail)
                 plot.addItem(marker)
                 self._markers.append((plot, marker))
@@ -378,11 +467,12 @@ class StatisticsTab:
                        f'{snap["baud"]} baud | {snap["status"]} | {snap["started_utc"]}')
             if snap.get('transfer_profile'):
                 caption += ' | '+snap['transfer_profile']
-        self.header.setText(html.escape(caption), color=themes.CURRENT['plot_fg'])
+        self.header.setText(html.escape(caption), color=graph_style.colors(self.app)['plot_fg'])
         self.window.setWindowTitle(f'Transfer statistics | {snap["name"]} | {snap["status"]}')
         if full or getattr(self, '_drawn_id', None) != snap['id']:
             self.rate_plot.enableAutoRange()
             self.rssi_plot.enableAutoRange()
+            self.overlay_view.enableAutoRange(axis='y')
         self._drawn_id = snap['id']
 
     def export_csv(self):
@@ -406,25 +496,32 @@ class StatisticsTab:
             raise RuntimeError('Graphs unavailable')
         import pyqtgraph.exporters
         session = self.selected_session()
-        ranges = [(plot, plot.viewRange(), plot.getViewBox().autoRangeEnabled())
-                  for plot in (self.rate_plot, self.rssi_plot)]
+        original_overlay = self._overlay_enabled
+        views = [self.rate_plot.getViewBox(), self.rssi_plot.getViewBox(), self.overlay_view]
+        ranges = [(view, view.viewRange(), view.autoRangeEnabled()) for view in views]
+        restore_data = full and hasattr(session, 'graph_snapshot')
         try:
-            if full and hasattr(session, 'graph_snapshot'):
+            # A standalone RSSI export temporarily restores its panel. The
+            # persisted overlay preference and current interactive view survive.
+            if target == 'RSSI' and original_overlay:
+                self._apply_overlay(False)
+            if restore_data:
                 self._draw(session.graph_snapshot(), full=True)
-                self.rate_plot.autoRange()
-                self.rssi_plot.autoRange()
-                self.app.qt_app.processEvents()
+                self.rate_plot.autoRange(); self.rssi_plot.autoRange(); self.overlay_view.autoRange()
+            self.app.qt_app.processEvents()
+            self._sync_overlay()
             item = self.window.scene() if target == 'Combined' else (self.rate_plot if target == 'Rates' else self.rssi_plot)
             exporter = pyqtgraph.exporters.ImageExporter(item)
             exporter.parameters()['width'] = 1600
             exporter.export(str(path))
         finally:
-            if full and hasattr(session, 'graph_snapshot'):
+            self._apply_overlay(original_overlay)
+            if restore_data:
                 self._plot_key = None
                 self._draw(session.snapshot())
-                for plot, view, auto in ranges:
-                    plot.setRange(xRange=view[0], yRange=view[1], padding=0)
-                    plot.enableAutoRange(x=auto[0], y=auto[1])
+            for view, ranges_before, auto in ranges:
+                view.setRange(xRange=ranges_before[0], yRange=ranges_before[1], padding=0)
+                view.enableAutoRange(x=auto[0], y=auto[1])
 
     def export_png(self):
         session = self.selected_session()
