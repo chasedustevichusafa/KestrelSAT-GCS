@@ -304,10 +304,13 @@ class TabTests(unittest.TestCase):
         # Dropped probe completion must still release Busy. Probe results carry
         # no image; the mailbox schedules another safe cycle only when running.
         self.tab.running = True
-        with patch.object(self.app, '_post_rx', return_value=None):
+        # Busy is deliberately released before a running preview schedules its
+        # next tick. Hold that follow-on tick here: an extra Tk update in until()
+        # could otherwise start a frame before this probe-only assertion runs.
+        with patch.object(self.app, '_post_rx', return_value=None), patch.object(self.tab, '_tick'):
             self.tab._launch('probe')
             self.until(lambda: not self.tab.busy)
-        self.tab.stop()
+            self.tab.stop()
         self.assertEqual(self.port.captures, 0)
         self.assertFalse(self.app._transfer_active.is_set())
 
