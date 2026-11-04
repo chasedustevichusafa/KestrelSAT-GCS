@@ -138,3 +138,13 @@ workflow runs the theme check before packaging. Firmware source packaging checks
 required files and ZIP checksum round-trips, but does not compile firmware or
 flash hardware. Use the documented PlatformIO builds and physical tests for
 those separate forms of validation.
+
+### Deterministic retry diagnostics — 2026-11-04
+
+The loss/corruption counter regression uses a client-local virtual clock and
+advances it only when the fake serial peer has no reply bytes. Exactly two
+dropped replies and one malformed reply must still produce three retries,
+three timeouts, one malformed frame and no stale frame, with one request ID
+and verified output bytes. This keeps a busy Windows scheduler from adding
+unintended timeouts while fragmenting a valid response. Separate tests retain
+real elapsed-time timeout/cancellation checks. Production timing is unchanged.

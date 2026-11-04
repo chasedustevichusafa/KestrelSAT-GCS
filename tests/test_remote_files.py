@@ -280,10 +280,25 @@ class ClientTests(unittest.TestCase):
         port.write = write
         events = []
         client = rf.Client(port, timeout=0.015, diagnostic=lambda event, **info: events.append((event, info)))
-        with tempfile.TemporaryDirectory() as tmp:
+        # This test injects exactly two lost replies and one malformed reply.
+        # Advance only a client-local virtual clock on an empty simulated read;
+        # wall-clock scheduling must not add extra failures while a valid frame
+        # is being fragmented into 19-byte reads on a busy Windows CI runner.
+        # Other tests still exercise real elapsed-time bounds and cancellation.
+        now = [0.0]
+        original_read = port.read
+        def read(count):
+            if not port.rx:
+                now[0] += client.timeout
+                return b''
+            return original_read(count)
+        port.read = read
+        with patch.object(rf, 'time') as clock, tempfile.TemporaryDirectory() as tmp:
+            clock.monotonic.side_effect = lambda: now[0]
             destination = Path(tmp)/'received.bin'
             client.download('/data.bin', destination)
             self.assertEqual(destination.read_bytes(), port.content)
+        self.assertEqual(len(attempts), 4)
         self.assertEqual(len(set(attempts)), 1)
         self.assertEqual(client.counters, dict(retries=3, timeouts=3, malformed=1, stale=0))
         self.assertEqual(sum(event == 'retry' for event, _ in events), 3)
