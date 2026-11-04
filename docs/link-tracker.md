@@ -150,3 +150,51 @@ the fastest stable rate, then do a longer test with distance/obstruction markers
 Keep baud, addressing, channel, power and antenna placement documented and
 consistent between comparisons. Successful simulation and packaging do not
 establish on-air performance or a validated 10 Hz hardware rate.
+
+## Rebuild saved graphs — 2026-11-03
+
+Use **Open CSV bundle...** to reopen an exported ZIP, or **Open session folder...**
+to select a folder containing `packets.csv`, `probes.csv`, `events.csv` and
+`session.json`. A radio connection is not needed. Stop Link Tracker and let any
+current file operation finish before opening another session.
+
+The loader validates the four files off the GUI thread, creates a private
+read-only analysis copy, and selects **Full session** automatically. RSSI,
+latency, recorded rolling probe success, original elapsed time, outage gaps and
+checkpoint/distance plots can be viewed and exported again. White/black graph
+preferences and the optional median/min–max band still apply. Imported sessions
+are labelled **saved session**, never start probing, and remain in the recent
+session selector alongside newly recorded tests. Reopening the same recording
+creates a distinct history entry so analysis choices cannot select the wrong copy.
+
+By default, import preserves the recorded `source_verified` and `valid_sample`
+flags. For an earlier capture with RSSI values that were unverified at collection:
+
+1. Enter the known satellite receive address in **Expected receive source**.
+   For the owner's confirmed `0x81` short-source setup, this is **0000**.
+2. Enable **On open: recheck RSSI using Expected receive source above**.
+3. Open the bundle or session folder again.
+
+This explicit analysis choice checks the selected source plus RSSI range,
+packet age, session timing and DB ambiguity. It does not invent missing readings,
+accept stale/ambiguous measurements, program the radios, or rewrite original
+verification flags. The graph header and status identify the source recheck.
+Re-exporting a CSV bundle copies the original four files; an analysis override
+is not silently written into them. Choose the same override again when reopening
+that raw bundle in the future.
+
+Imported summaries are rebuilt from the full CSV stream, not from a decimated
+plot. Recorded rolling success values are retained. Older schema-1 files without
+optional rolling-success/validity columns are supported. Interrupted sessions
+whose metadata still says `running` are shown as frozen saved data with a notice;
+CSV counts take precedence over stale summary counts. Historical RSSI is labelled
+**last recorded**, rather than treated as a fresh measurement today.
+
+Private caches retain original bytes separately from normalized graph data and
+expire once history/worker owners release them or the application closes. Input
+ZIPs are never extracted using arbitrary member paths. Duplicate/missing required
+files, symlinks, malformed CSV, nonfinite numbers, invalid flags, reversed elapsed
+time and inconsistent successful-latency fields are rejected without replacing
+the current graph. The input limit is 512 MiB total, 384 MiB per CSV, 1 MiB JSON,
+and two million rows per CSV. Full plots retain the existing bounded-envelope
+behavior; raw measurements remain complete in the source bundle.

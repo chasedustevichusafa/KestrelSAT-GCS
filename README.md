@@ -36,6 +36,15 @@ interactive rendering of live data.
 - **Resize-safe**: a minimum window size plus scrollable panels, so no control
   can be pushed out of reach; Send Data and the monitor controls always stay visible
 
+## Reopen Link Tracker CSV bundles (2026-11-03)
+
+Link Tracker now offers **Open CSV bundle...** and **Open session folder...** to
+rebuild saved RSSI, success, latency and distance graphs without a radio. Original
+timing, markers and verification flags are preserved; PNG export and white/black
+styles remain available. Optional source rechecking can recover earlier
+unverified RSSI using a known address such as `0000`, with the analysis choice
+labelled and the original files unchanged. See [Link Tracker](docs/link-tracker.md#rebuild-saved-graphs--2026-11-03).
+
 ## Graph formatting (2026-11-03)
 
 All graphs default to white. Choose **Options → Graph Background → White / Black**

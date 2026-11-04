@@ -3,9 +3,13 @@ from collections import deque
 import bisect
 import html
 import math
-import statistics
 
 from . import themes, scaling, graph_style
+
+
+def _median(ordered):
+    middle = len(ordered)//2
+    return ordered[middle] if len(ordered)%2 else (ordered[middle-1]+ordered[middle])/2
 
 
 def graph_data(snapshot):
@@ -28,21 +32,25 @@ def graph_data(snapshot):
     samples.sort(key=lambda point: point[0])
     x, raw, med, low, high = [], [], [], [], []
     window = deque()
+    ordered = []
     previous = None
     for at, value in samples:
         if previous is not None and at-previous > 2:
             x.append(previous+min(1, (at-previous)/2))
             for curve in (raw, med, low, high):
                 curve.append(nan)
-            window.clear()
+            window.clear(); ordered.clear()
         while window and window[0][0] < at-5:
-            window.popleft()
+            old = window.popleft()[1]
+            ordered.pop(bisect.bisect_left(ordered, old))
         if math.isfinite(value):
             window.append((at, value))
-            values = [point[1] for point in window]
-            middle, bottom, top = statistics.median(values), min(values), max(values)
+            # Maintain the ordered window rather than sorting it for every
+            # sample. Dense archived data must not stall the GUI redraw loop.
+            bisect.insort(ordered, value)
+            middle, bottom, top = _median(ordered), ordered[0], ordered[-1]
         else:
-            window.clear()
+            window.clear(); ordered.clear()
             middle = bottom = top = nan
         x.append(at); raw.append(value); med.append(middle); low.append(bottom); high.append(top)
         previous = at
@@ -67,14 +75,19 @@ def graph_data(snapshot):
             misses.append(at)
     distance_x, distance_y = [], []
     finite = [(t,v) for t,v in samples if math.isfinite(v)]
-    times = [t for t,v in finite]
-    for event in snapshot['events']:
-        if event.get('distance_m') not in ('', None):
-            at = float(event['elapsed_s'])
-            values = [v for t,v in finite[bisect.bisect_left(times, at-2):bisect.bisect_right(times, at+2)]]
-            if values:
-                distance_x.append(float(event['distance_m']))
-                distance_y.append(statistics.median(values))
+    checkpoints = sorted((event for event in snapshot['events'] if event.get('distance_m') not in ('', None)),
+                         key=lambda event: float(event['elapsed_s']))
+    left = right = 0
+    ordered = []
+    for event in checkpoints:
+        at = float(event['elapsed_s'])
+        while right < len(finite) and finite[right][0] <= at+2:
+            bisect.insort(ordered, finite[right][1]); right += 1
+        while left < right and finite[left][0] < at-2:
+            ordered.pop(bisect.bisect_left(ordered, finite[left][1])); left += 1
+        if ordered:
+            distance_x.append(float(event['distance_m']))
+            distance_y.append(_median(ordered))
     return dict(x=x, raw=raw, median=med, low=low, high=high,
                 px=px, success=success, latency=latency, misses=misses,
                 distance_x=distance_x, distance_y=distance_y)
@@ -156,7 +169,7 @@ class LinkPlot:
             if event['event'] != 'marker':
                 continue
             marker = pg.InfiniteLine(float(event['elapsed_s']), angle=90,
-                label=event['detail'][:30], labelOpts={'position': .9, 'color': graph_style.colors(self.tab.app)['plot_fg']},
+                label=event['detail'][:30].replace('{','{{').replace('}','}}'), labelOpts={'position': .9, 'color': graph_style.colors(self.tab.app)['plot_fg']},
                 pen=pg.mkPen(graph_style.colors(self.tab.app)['plot_fg'], style=2))
             self.rssi.addItem(marker); self.markers.append(marker)
         elapsed = max(1, snapshot['elapsed'])
@@ -172,6 +185,10 @@ class LinkPlot:
             self.latency.setYRange(0, max(10, max(finite_latency, default=0)*1.15), padding=.02)
         caption = (f'{snapshot["name"]} | {snapshot["status"]} | {snapshot["probes"]} probes | '
                    'satellite → ground; missing RSSI is a gap')
+        if snapshot.get('imported'):
+            caption += ' | saved session ('+snapshot.get('original_status','unknown')+')'
+            if snapshot.get('source_override') is not None:
+                caption += f' | RSSI rechecked: {snapshot["source_override"]:04x}'
         if snapshot.get('decimated'):
             caption += ' | full-session envelope; smoothing hidden'
         self.header.setText(html.escape(caption), color=graph_style.colors(self.tab.app)['plot_fg'])
