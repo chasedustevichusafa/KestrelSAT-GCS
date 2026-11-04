@@ -43,9 +43,11 @@ operation. SD rename/delete are not power-loss transactions.
 
 ## Protocol additions
 
-HELLO remains `HELLO|1|128`; CAPS becomes `CAPS|UPLOAD1|MANAGE1|128`.
-Paths remain hex-encoded. Maximum frame buffer increases from 768 to 1024 bytes
-so RENAME can carry two full-length paths; the data chunk remains 128 bytes.
+HELLO remains `HELLO|1|128`; the current capability response is
+`CAPS|UPLOAD1|MANAGE1|CAMERA1|CAMDIAG1|FAST1|128`. Paths remain hex-encoded.
+The frame buffer is 1024 bytes so RENAME can carry two full-length paths.
+Legacy transfers retain 128-byte chunks; FAST1 negotiates larger blocks
+without changing management semantics. See [transfer profiles](transfer-speed.md).
 
 | Request fields | Response fields |
 | --- | --- |

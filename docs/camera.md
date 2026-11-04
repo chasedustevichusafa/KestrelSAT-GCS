@@ -111,7 +111,9 @@ the same offset; failed writes never reread/advance the camera FIFO for retries.
 Full JPEG decoding happens on the GCS when View is requested. No full image buffer
 is allocated on the satellite.
 
-KFS1 adds `CAMERA1` to CAPS, retaining HELLO version 1 and 128-byte file chunks:
+KFS1 advertises `CAMERA1` in CAPS, retaining HELLO version 1 and legacy
+128-byte file chunks. Current main also advertises FAST1 for
+[negotiated larger file blocks](transfer-speed.md); camera job semantics remain:
 
 | Request | Reply |
 | --- | --- |

@@ -36,7 +36,7 @@ prefix (case-insensitive). The reserved prefix identifies upload temporary files
 
 The GCS calculates the source CRC32 before starting and checks the sent stream
 and source metadata for changes. The satellite creates an exclusive
-`.kfs-xxxxxxxx.part` file in the target folder. Every 128-byte WRITE has a checked
+`.kfs-xxxxxxxx.part` file in the target folder. Every data-block write has a checked
 frame and offset; acknowledgments advance progress only after a full write and
 SD sync. Transient write failures retry the same range up to three times; the
 SD adapter reopens only that session's temporary file before retrying. Duplicate
@@ -85,12 +85,14 @@ local read diagnostics remain available with the GCS disconnected.
 
 ## Protocol extension
 
-HELLO remains `HELLO|1|128`, preserving older download clients. New commands use
+HELLO remains `HELLO|1|128`, preserving older download clients. The table below
+describes legacy upload commands; FAST1 negotiates PUTX/WRITEX and larger
+hex/Base64 blocks as described in [transfer profiles](transfer-speed.md). Commands use
 the existing KFS1 frame checksum and request IDs:
 
 | Command | Purpose / successful response |
 | --- | --- |
-| CAPS | `CAPS|UPLOAD1|128` capability check |
+| CAPS | `CAPS\|UPLOAD1\|MANAGE1\|CAMERA1\|CAMDIAG1\|FAST1\|128` capability check |
 | PUT pathHex size crc32 | Create temporary file; `READY|token|size` |
 | WRITE token offset dataHex | Write/sync up to 128 bytes; `ACK|next|size` |
 | VERIFY token offset | Read back up to 1024 bytes; `CHECKED|next|size` |
