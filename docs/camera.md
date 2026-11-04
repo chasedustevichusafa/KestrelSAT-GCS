@@ -117,11 +117,11 @@ KFS1 advertises `CAMERA1` in CAPS, retaining HELLO version 1 and legacy
 
 | Request | Reply |
 | --- | --- |
-| `CAMINFO` | `CAMERA|model|resolution_bitmask|camera_error|SD_READY_or_SD_UNAVAILABLE` |
-| `CAPTURE|job_hex|mode_index|path_hex` | `CAMJOB|job_hex|state|done|total|crc32|path_hex|error` |
-| `CAMSTATUS|job_hex` | Same job reply, or UNKNOWN |
-| `CAMABORT|job_hex` | Same job reply after best-effort cancellation; an already saved job remains SAVED |
-| `CAMDIAG|job_hex` (optional `CAMDIAG1` capability) | `CAMDETAIL|job_hex|fifo_bytes|read_bytes|saved_bytes|prefix_bytes|first_8_bytes_hex|last_8_bytes_hex|error` |
+| `CAMINFO` | `CAMERA\|model\|resolution_bitmask\|camera_error\|SD_READY_or_SD_UNAVAILABLE` |
+| `CAPTURE\|job_hex\|mode_index\|path_hex` | `CAMJOB\|job_hex\|state\|done\|total\|crc32\|path_hex\|error` |
+| `CAMSTATUS\|job_hex` | Same job reply, or UNKNOWN |
+| `CAMABORT\|job_hex` | Same job reply after best-effort cancellation; an already saved job remains SAVED |
+| `CAMDIAG\|job_hex` (optional `CAMDIAG1` capability) | `CAMDETAIL\|job_hex\|fifo_bytes\|read_bytes\|saved_bytes\|prefix_bytes\|first_8_bytes_hex\|last_8_bytes_hex\|error` |
 
 The GCS exposes Stop waiting and Check capture; CAMABORT is a protocol operation,
 not an automatic action on disconnect. Capture paths are restricted to a single

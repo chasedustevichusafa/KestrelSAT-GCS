@@ -51,9 +51,9 @@ without changing management semantics. See [transfer profiles](transfer-speed.md
 
 | Request fields | Response fields |
 | --- | --- |
-| `DELETE|path_hex` | `DELETED` or `ERR|code` |
-| `RENAME|source_hex|target_hex` | `RENAMED` or `ERR|code` |
-| `RESULT|mutation_request_id_hex` | `RESULT|DELETE_or_RENAME|DELETED_or_RENAMED`, `RESULT|operation|ERR|code`, or `RESULT|UNKNOWN` |
+| `DELETE\|path_hex` | `DELETED` or `ERR\|code` |
+| `RENAME\|source_hex\|target_hex` | `RENAMED` or `ERR\|code` |
+| `RESULT\|mutation_request_id_hex` | `RESULT\|DELETE_or_RENAME\|DELETED_or_RENAMED`, `RESULT\|operation\|ERR\|code`, or `RESULT\|UNKNOWN` |
 
 Existing upload/download commands remain supported. The firmware rejects file
 management while another file session is active. USB logs identify confirmed
