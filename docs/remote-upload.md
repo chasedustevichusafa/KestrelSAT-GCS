@@ -1,6 +1,6 @@
 # Verified satellite uploads — 2026-10-21
 
-Use matching GCS and Lab 8 builds from `feature/remote-upload`. This extends the
+Use matching GCS and Lab 8 builds from `main`. This extends the
 working stability build. The project owner confirmed the preceding stability
 build worked on hardware and subsequently confirmed the upload build works.
 The current [file-management build](remote-file-management.md) includes these uploads.
@@ -8,8 +8,8 @@ The current [file-management build](remote-file-management.md) includes these up
 ## Upload a file
 
 1. Extract the matching firmware source artifact. In PlatformIO, upload
-   `esp32thing_plus_115200` for the existing 115200 radios. The USB startup line
-   should contain `KFS1 upload-1`. The default environment remains 9600.
+   `esp32thing_plus_115200_camera_cs27` for the confirmed GPIO27/115200 setup. The USB startup line
+   should contain `KFS1 speed-1`. The default environment remains 9600.
 2. Extract and launch the matching Windows GCS. Keep the working radio pairing,
    UART rate and mode: satellite AP=0; ground AP=1 and GCS XBee API (AP=1) for
    RSSI, or ground AP=0 and GCS Transparent. Legacy AO=2 output is supported.
@@ -36,7 +36,7 @@ prefix (case-insensitive). The reserved prefix identifies upload temporary files
 
 The GCS calculates the source CRC32 before starting and checks the sent stream
 and source metadata for changes. The satellite creates an exclusive
-`.kfs-xxxxxxxx.part` file in the target folder. Every 128-byte WRITE has a checked
+`.kfs-xxxxxxxx.part` file in the target folder. Every data-block write has a checked
 frame and offset; acknowledgments advance progress only after a full write and
 SD sync. Transient write failures retry the same range up to three times; the
 SD adapter reopens only that session's temporary file before retrying. Duplicate
@@ -85,16 +85,18 @@ local read diagnostics remain available with the GCS disconnected.
 
 ## Protocol extension
 
-HELLO remains `HELLO|1|128`, preserving older download clients. New commands use
+HELLO remains `HELLO|1|128`, preserving older download clients. The table below
+describes legacy upload commands; FAST1 negotiates PUTX/WRITEX and larger
+hex/Base64 blocks as described in [transfer profiles](transfer-speed.md). Commands use
 the existing KFS1 frame checksum and request IDs:
 
 | Command | Purpose / successful response |
 | --- | --- |
-| CAPS | `CAPS|UPLOAD1|128` capability check |
-| PUT pathHex size crc32 | Create temporary file; `READY|token|size` |
-| WRITE token offset dataHex | Write/sync up to 128 bytes; `ACK|next|size` |
-| VERIFY token offset | Read back up to 1024 bytes; `CHECKED|next|size` |
-| COMMIT token | Verify totals and publish; `STORED|size|crc32` |
+| CAPS | `CAPS\|UPLOAD1\|MANAGE1\|CAMERA1\|CAMDIAG1\|FAST1\|128` capability check |
+| PUT pathHex size crc32 | Create temporary file; `READY\|token\|size` |
+| WRITE token offset dataHex | Write/sync up to 128 bytes; `ACK\|next\|size` |
+| VERIFY token offset | Read back up to 1024 bytes; `CHECKED\|next\|size` |
+| COMMIT token | Verify totals and publish; `STORED\|size\|crc32` |
 | STATUS token | Active position or retained STORED result |
 | ABORT token | Clean unfinished file; ABORTED result or retained STORED result |
 | CLEAN pathHex | Remove a reserved inactive temporary file; REMOVED |

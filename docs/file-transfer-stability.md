@@ -1,12 +1,13 @@
 # File-transfer stability — 2026-10-21
 
-Both repositories use `fix/file-transfer-stability`, based on the fork main
-branches containing the merged transfer-statistics and high-baud work. Keep these changes separate from
-main while testing on the satellite.
+The stability changes are merged into both repositories' `main`. The owner
+confirmed working transfers after the recovery changes and subsequent
+GPIO27/unicast setup. This guide retains the diagnostic procedure for recurrence;
+the original physical SD failure source was not established.
 
 ## Findings and changes
 
-The hardware report is approximately 95% failures at varying offsets in XBee
+The original hardware report was approximately 95% failures at varying offsets in XBee
 API mode with a roughly 14 KB file, followed by `READ_ERROR`. The checked-in
 service uses `READ_FAILED`, not `READ_ERROR`; the diagnostic firmware startup
 marker and complete GCS/USB logs are needed to reconcile the exact deployed
@@ -35,13 +36,14 @@ in the satellite USB log, not the GCS wire-retry count.
 ## Obtain the diagnostic builds
 
 In each fork's Actions tab, select a successful run on
-`fix/file-transfer-stability`. Download/extract the Windows GCS artifact and the
+`main`. Download/extract the Windows GCS artifact and the
 Lab 8 firmware artifact while signed into GitHub. In PlatformIO, upload the
-firmware's `esp32thing_plus_115200` environment for the existing 115200 radios.
+firmware's `esp32thing_plus_115200_camera_cs27` for GPIO27/115200; choose the
+GPIO12 variant only for original camera-CS wiring.
 The default `esp32thing_plus` environment remains 9600.
 
 The satellite USB monitor is always 115200. After reset, verify
-`KFS1 stability-1`, the reset reason, `SD_SPI_MHZ=25`, the XBee UART rate and
+`KFS1 speed-1`, the reset reason, `SD_SPI_MHZ=25`, the XBee UART rate and
 `SD ready`. Radio settings remain under XCTU control. Use satellite AP=0 and
 either ground AP=0/GCS Transparent or ground AP=1/GCS XBee API (AP=1). Existing
 legacy AO=2 output is supported.
@@ -117,6 +119,8 @@ These simulations do not establish physical link reliability.
 
 Run all GCS suites with `QT_QPA_PLATFORM=offscreen xvfb-run -a python tests/run_all.py`.
 Run Lab 8's `python test/test_protocol.py --gcs /path/to/KestrelSAT-GCS` and
-compile both firmware environments with PlatformIO. Both artifact workflows
-include this stability branch and main; packaging verifies a Windows executable
-or a Windows ZIP extraction/checksum round trip, respectively.
+compile the selected firmware environment (or all four for a full build check)
+with PlatformIO. Current main/PR artifact workflows validate their respective
+packages: the GCS runs selected tests and verifies the executable; firmware
+packaging verifies required sources and a Windows ZIP/checksum round-trip,
+without compiling or uploading firmware.

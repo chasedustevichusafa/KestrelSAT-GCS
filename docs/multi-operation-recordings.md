@@ -1,7 +1,7 @@
 # Multi-operation transfer recordings — 2026-10-21
 
 This GCS feature builds on the existing per-transfer statistics. Use the Windows
-artifact from `feature/multi-operation-recordings`; the current Lab 8 firmware
+artifact from `main`; the current Lab 8 firmware
 and working radio settings remain compatible. No firmware update is required.
 
 ## Record a test

@@ -1,10 +1,10 @@
 # Remote still-image capture — 2026-10-21
 
-Use matching GCS and Lab 8 firmware builds from `main` after merge, or
-`feature/remote-camera` while testing this PR. On 2026-10-22 the owner confirmed
+Use matching GCS and Lab 8 firmware builds from `main`. On 2026-10-22 the owner confirmed
 camera operation with GPIO27 and unicast radios and reported no remaining issues
 at the agreed stopping point. Measured transfer results and their limits are
-documented below. There is no live preview or automatic image stream.
+documented below. This Camera page performs still capture; periodic capture/download preview is
+available separately in [Live Preview](live-preview.md).
 
 ## First test
 
@@ -12,7 +12,7 @@ documented below. There is no live preview or automatic image stream.
    `esp32thing_plus_115200_camera_cs27` for the confirmed GPIO27/115200 setup.
    `esp32thing_plus_115200` retains GPIO12; default `esp32thing_plus` retains
    GPIO12/9600. Firmware and physical CS wiring must match. Confirm USB startup marker
-   `KFS1 camera-2`, followed by camera sensor/model/status output. For upload
+   `KFS1 speed-1`, followed by camera sensor/model/status output. For upload
    failures with the camera attached, follow the GPIO12 procedure below.
 2. Keep existing board, wiring, SD clock and radio configuration. The satellite
    XBee remains AP=0. Ground AP=1 pairs with GCS **XBee API (AP=1)**, or ground
@@ -111,15 +111,17 @@ the same offset; failed writes never reread/advance the camera FIFO for retries.
 Full JPEG decoding happens on the GCS when View is requested. No full image buffer
 is allocated on the satellite.
 
-KFS1 adds `CAMERA1` to CAPS, retaining HELLO version 1 and 128-byte file chunks:
+KFS1 advertises `CAMERA1` in CAPS, retaining HELLO version 1 and legacy
+128-byte file chunks. Current main also advertises FAST1 for
+[negotiated larger file blocks](transfer-speed.md); camera job semantics remain:
 
 | Request | Reply |
 | --- | --- |
-| `CAMINFO` | `CAMERA|model|resolution_bitmask|camera_error|SD_READY_or_SD_UNAVAILABLE` |
-| `CAPTURE|job_hex|mode_index|path_hex` | `CAMJOB|job_hex|state|done|total|crc32|path_hex|error` |
-| `CAMSTATUS|job_hex` | Same job reply, or UNKNOWN |
-| `CAMABORT|job_hex` | Same job reply after best-effort cancellation; an already saved job remains SAVED |
-| `CAMDIAG|job_hex` (optional `CAMDIAG1` capability) | `CAMDETAIL|job_hex|fifo_bytes|read_bytes|saved_bytes|prefix_bytes|first_8_bytes_hex|last_8_bytes_hex|error` |
+| `CAMINFO` | `CAMERA\|model\|resolution_bitmask\|camera_error\|SD_READY_or_SD_UNAVAILABLE` |
+| `CAPTURE\|job_hex\|mode_index\|path_hex` | `CAMJOB\|job_hex\|state\|done\|total\|crc32\|path_hex\|error` |
+| `CAMSTATUS\|job_hex` | Same job reply, or UNKNOWN |
+| `CAMABORT\|job_hex` | Same job reply after best-effort cancellation; an already saved job remains SAVED |
+| `CAMDIAG\|job_hex` (optional `CAMDIAG1` capability) | `CAMDETAIL\|job_hex\|fifo_bytes\|read_bytes\|saved_bytes\|prefix_bytes\|first_8_bytes_hex\|last_8_bytes_hex\|error` |
 
 The GCS exposes Stop waiting and Check capture; CAMABORT is a protocol operation,
 not an automatic action on disconnect. Capture paths are restricted to a single
