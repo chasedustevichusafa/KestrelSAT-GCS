@@ -3,7 +3,7 @@ name: Windows test build
 on:
   workflow_dispatch:
   push:
-    branches: ['main', 'feature/remote-files', 'feature/transfer-statistics', 'fix/file-transfer-stability', 'feature/remote-upload', 'feature/remote-file-management', 'feature/multi-operation-recordings', 'feature/remote-camera', 'docs/code-walkthrough', 'feature/transfer-speed', 'feature/live-camera-preview']
+    branches: ['main', 'feature/remote-files', 'feature/transfer-statistics', 'fix/file-transfer-stability', 'feature/remote-upload', 'feature/remote-file-management', 'feature/multi-operation-recordings', 'feature/remote-camera', 'docs/code-walkthrough', 'feature/transfer-speed', 'feature/live-camera-preview', 'feature/link-tracker']
   pull_request:
     paths:
       - 'README.md'
@@ -47,6 +47,8 @@ jobs:
           python tests/test_transfer_stats.py
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python tests/test_xbee_api.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python tests/test_link_tracker.py
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Build Windows executable
         run: python -m PyInstaller --noconfirm KestrelSAT_GCS_v1.spec

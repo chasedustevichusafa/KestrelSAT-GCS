@@ -89,6 +89,7 @@ from . import zmodem
 from .remote_tab import RemoteFilesTab
 from .camera_tab import CameraTab
 from .preview_tab import LivePreviewTab
+from .link_tab import LinkTrackerTab
 from .stats_tab import StatisticsTab
 from .transfer_stats import Recorder
 from .xbee_api import ApiSerial, MeteredSerial
@@ -314,6 +315,7 @@ class SerialGUI:
         self.camera = CameraTab(self)
         self.transfer_stats = StatisticsTab(self)
         self.live_preview = LivePreviewTab(self)
+        self.link_tracker = LinkTrackerTab(self)
 
         # Plot tabs, plus the '+' that adds another one. Built last so the
         # plot tabs and '+' sit to the right of the fixed tabs.
@@ -1213,6 +1215,7 @@ class SerialGUI:
     # must become disconnected. This is distinct from a temporary zero-rate sample.
     def disconnect(self):
         """Disconnect from serial port"""
+        self.link_tracker.stop('disconnected')
         self.transfer_recorder.event('disconnected', 'Serial connection closed')
         self.is_connected = False
         self.test_mode = False
@@ -1452,6 +1455,11 @@ class SerialGUI:
             rssi_enabled=bool(self.transfer_stats.rssi_enabled.get() and getattr(port, 'api_mode', False)))
 
     def _begin_transfer(self, direction, paths=None, dest=None, prefix=b""):
+        # Native file dialogs pump Tk events: tracking may have started since
+        # the caller first checked ownership. Recheck at the actual claim point.
+        if self.link_tracker.busy:
+            messagebox.showinfo('Link Tracker active', 'Stop Link Tracker before starting a file transfer.')
+            return
         self._transfer_cancel = threading.Event()
         if hasattr(self.serial_connection, 'set_transfer_cancel'):
             self.serial_connection.set_transfer_cancel(self._transfer_cancel)
@@ -2050,6 +2058,7 @@ class SerialGUI:
             return
 
         self._closing = True
+        self.link_tracker.close()
         self.live_preview.close()
 
         # Cancel the recurring timers first. stop_logging() and disconnect()

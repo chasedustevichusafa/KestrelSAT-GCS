@@ -73,7 +73,7 @@ class StatisticsTab:
         ttk.Label(scope, text='PNG time range:').pack(side=tk.LEFT)
         ttk.Combobox(scope, textvariable=self.png_extent, state='readonly', width=16,
                      values=('Full timeline', 'Current view')).pack(side=tk.LEFT, padx=6)
-        ttk.Checkbutton(self.body, text='Poll ground receiver RSSI during transfers (API mode only)',
+        ttk.Checkbutton(self.body, text='Record ground receiver RSSI during transfers (API mode only)',
                         variable=self.rssi_enabled, command=self._rssi_changed).pack(anchor=tk.W, pady=(12, 6))
         self.summary_label = ttk.Label(self.body, textvariable=self.summary, wraplength=540, justify=tk.LEFT)
         self.summary_label.pack(anchor=tk.W, fill=tk.X, pady=8)
@@ -199,7 +199,9 @@ class StatisticsTab:
             active = self.app.transfer_recorder.active
             port = self.app.serial_connection
             if port is not None and hasattr(port, 'set_rssi_polling'):
-                port.set_rssi_polling(bool(active and active.status == 'running' and self.rssi_enabled.get()))
+                tracker = getattr(self.app, 'link_tracker', None)
+                port.set_rssi_polling(bool(tracker and tracker.busy and self.app._transfer_active.is_set() or
+                    active and active.status == 'running' and self.rssi_enabled.get()))
             self._refresh()
             if self.window is not None and self.app.qt_app is not None:
                 self.app.qt_app.processEvents()
