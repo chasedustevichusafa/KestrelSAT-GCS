@@ -19,6 +19,7 @@ SUITES = [
     "test_transfer_stats.py",
     "test_xbee_api.py",
     "test_link_tracker.py",
+    "test_graph_formatting.py",
     "test_correctness.py",
     "test_scaling.py",
     "test_multiplot.py",

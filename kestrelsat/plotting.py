@@ -43,7 +43,7 @@ from collections import deque
 from tkinter import ttk, colorchooser
 from typing import Any, Dict
 
-from . import scaling, themes
+from . import scaling, themes, graph_style
 from .channels import Channel
 from .themes import contrast_fg_for
 from .widgets import ScrollableFrame, ToolTip
@@ -75,7 +75,7 @@ class PlotTab:
         self.plot_window = None
         self.plot_widget = None
         self.plot_legend = None
-        self.plot_colors = list(themes.CURRENT["plot_palette"])
+        self.plot_colors = list(graph_style.colors(self.app)["plot_palette"])
 
         self.plot_max_points = 1000
         self.plot_width = 500
@@ -229,9 +229,9 @@ class PlotTab:
         try:
             legend = pg.LegendItem(
                 offset=self.LEGEND_OFFSET,
-                brush=pg.mkBrush(themes.CURRENT["plot_legend_bg"]),
-                pen=pg.mkPen(themes.CURRENT["plot_legend_border"]),
-                labelTextColor=themes.CURRENT["plot_fg"],
+                brush=pg.mkBrush(graph_style.colors(self.app)["plot_legend_bg"]),
+                pen=pg.mkPen(graph_style.colors(self.app)["plot_legend_border"]),
+                labelTextColor=graph_style.colors(self.app)["plot_fg"],
             )
             legend.setParentItem(self.plot_widget.getPlotItem())
             return legend
@@ -252,6 +252,7 @@ class PlotTab:
         if not PYQTGRAPH_AVAILABLE:
             return
 
+        c = graph_style.colors(self.app, c)
         try:
             pg.setConfigOption('background', c["plot_bg"])
             pg.setConfigOption('foreground', c["plot_fg"])
@@ -633,7 +634,7 @@ class PlotTab:
                             ch = self.channels.get(channel_name)
                             label = ch.label if ch else channel_name
                     
-                    self.plot_widget.setLabel('bottom', label, color=themes.CURRENT["plot_fg"])
+                    self.plot_widget.setLabel('bottom', label, color=graph_style.colors(self.app)["plot_fg"])
             except Exception:
                 pass
 
@@ -653,7 +654,7 @@ class PlotTab:
                     else:
                         label = "Value"  # Default Y-axis label
                     
-                    self.plot_widget.setLabel('left', label, color=themes.CURRENT["plot_fg"])
+                    self.plot_widget.setLabel('left', label, color=graph_style.colors(self.app)["plot_fg"])
             except Exception:
                 pass
 
@@ -673,7 +674,7 @@ class PlotTab:
                     else:
                         title = self.window_title
                     
-                    self.plot_widget.setTitle(title, color=themes.CURRENT["plot_fg"]) # type: ignore
+                    self.plot_widget.setTitle(title, color=graph_style.colors(self.app)["plot_fg"]) # type: ignore
             except Exception:
                 pass
 

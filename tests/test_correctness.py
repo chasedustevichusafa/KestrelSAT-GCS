@@ -210,7 +210,8 @@ if sg.PYQTGRAPH_AVAILABLE:
     # normalise: the constructor stores whatever it was given (a str here),
     # while setLabelTextColor() stores a QColor
     import pyqtgraph as _pg
-    expected = _pg.mkColor(sg.THEMES["dark"]["plot_fg"]).name().lower()
+    from kestrelsat import graph_style
+    expected = _pg.mkColor(graph_style.colors(app)["plot_fg"]).name().lower()
     actual = _pg.mkColor(app.plots[0].plot_legend.opts["labelTextColor"]).name().lower()
     check(actual == expected,
           "legend themed after clear_plot_data (%s vs %s)" % (actual, expected))

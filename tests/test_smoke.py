@@ -8,6 +8,7 @@ os.chdir(os.path.dirname(os.path.abspath(__file__)))
 
 import tkinter as tk
 import kestrelsat.app as sg
+from kestrelsat import graph_style
 
 print("PYQTGRAPH_AVAILABLE =", sg.PYQTGRAPH_AVAILABLE)
 
@@ -50,9 +51,9 @@ for name in sg.THEME_ORDER:
     assert app.received_text.tag_cget("ERROR", "foreground") == c["log_error"]
     assert app.status_canvas.itemcget(app.status_circle, "fill") == c["error"]
     assert str(app.log_status_label.cget("foreground")) == c["error"]
-    assert app.plot_colors == c["plot_palette"]
+    assert app.plot_colors == graph_style.colors(app)["plot_palette"]
     assert app.plots[0].channels["Sine"].color == "#123456", "user colour was clobbered"
-    assert app.plots[0].channels["Temp"].color == c["plot_palette"][app.plots[0].channels["Temp"].color_index]
+    assert app.plots[0].channels["Temp"].color == graph_style.colors(app)["plot_palette"][app.plots[0].channels["Temp"].color_index]
     swatch = app.plots[0].channels["Temp"].color_btn
     assert swatch.cget("bg") == app.plots[0].channels["Temp"].color
     assert json.load(open(sg.SETTINGS_FILE))["theme"] == name

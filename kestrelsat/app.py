@@ -90,6 +90,7 @@ from .remote_tab import RemoteFilesTab
 from .camera_tab import CameraTab
 from .preview_tab import LivePreviewTab
 from .link_tab import LinkTrackerTab
+from . import graph_style
 from .stats_tab import StatisticsTab
 from .transfer_stats import Recorder
 from .xbee_api import ApiSerial, MeteredSerial
@@ -130,6 +131,9 @@ class SerialGUI:
         # Settings and display scale come first: every widget below is built
         # at the scaled font size, so this cannot wait until after setup_gui().
         self.settings = self.load_settings()
+        raw_graph_background = self.settings.get('graph_background', 'white')
+        self.graph_background = raw_graph_background if raw_graph_background in graph_style.CHOICES else 'white'
+        self.graph_background_var = tk.StringVar(value=self.graph_background)
         self.ui_scale_setting = self.settings.get('ui_scale', 'auto')
         self.ui_scale = scaling.resolve(self.ui_scale_setting, root)
         scaling.apply_fonts(root, self.ui_scale)
@@ -216,7 +220,7 @@ class SerialGUI:
         # Plotting. The per-plot settings (buffers, delimiter, axes,
         # channels) live on each PlotTab; only the shared palette and
         # the list of plots are held here.
-        self.plot_colors = list(themes.CURRENT["plot_palette"])
+        self.plot_colors = list(graph_style.colors(self)["plot_palette"])
         self.plots: List[PlotTab] = []
         
         # Appearance / theme. Applied once here so that the ttk style database
@@ -355,6 +359,11 @@ class SerialGUI:
         # rightmost tabs - the '+' among them - are clipped and unclickable.
         options_menu.add_command(label="Add Plot", command=self.add_plot_tab)
         options_menu.add_separator()
+        graph_menu = tk.Menu(options_menu, tearoff=0)
+        for background in graph_style.CHOICES:
+            graph_menu.add_radiobutton(label=background.title(), value=background,
+                variable=self.graph_background_var, command=self.on_graph_background_selected)
+        options_menu.add_cascade(label="Graph Background", menu=graph_menu)
         options_menu.add_command(label="Preferences", command=self.show_preferences)
         options_menu.add_separator()
         options_menu.add_command(label="Reset Settings", command=self.reset_settings)
@@ -533,6 +542,17 @@ class SerialGUI:
         self.theme_name = name
         self.themes.apply(name)
         self._write_settings({'theme': name})
+
+    def on_graph_background_selected(self):
+        """Persist the graph palette and repaint open windows on Tk's thread."""
+        value = self.graph_background_var.get()
+        if value not in graph_style.CHOICES:
+            return
+        self.graph_background = value
+        self._write_settings({'graph_background': value})
+        # Existing listeners cover telemetry, transfer and link plot windows.
+        # Reapplying the SAME UI theme leaves controls unchanged.
+        self.themes.apply()
 
     def on_ui_scale_selected(self, *_args):
         """Apply and persist the display scale chosen in Preferences."""
@@ -743,12 +763,13 @@ class SerialGUI:
 
     def _on_theme_applied(self, c: Dict[str, Any]):
         """Fixups the generic widget walk cannot cover. Order matters."""
-        self.plot_colors = list(c["plot_palette"])
+        graph_colors = graph_style.colors(self, c)
+        self.plot_colors = list(graph_colors["plot_palette"])
         self._configure_text_tags(c)
         self._style_notepad_widget(c)
         for plot in self.plots:
-            plot.plot_colors = list(c["plot_palette"])
-            plot._remap_auto_channel_colors(c)
+            plot.plot_colors = list(graph_colors["plot_palette"])
+            plot._remap_auto_channel_colors(graph_colors)
             for channel_name in plot.channels:
                 plot.update_color_button_appearance(channel_name)
         self.update_status_indicator(self.is_connected)
@@ -2166,6 +2187,12 @@ class SerialGUI:
                 variable=self.theme_var,
                 command=self.on_theme_selected
             ).grid(row=row, column=0, sticky=tk.W, pady=2)
+
+        graph_frame = ttk.LabelFrame(theme_frame, text="Graph background (all plots and PNG exports)", padding=6)
+        graph_frame.grid(row=len(THEME_ORDER), column=0, sticky=tk.EW, pady=(8, 0))
+        for column, background in enumerate(graph_style.CHOICES):
+            ttk.Radiobutton(graph_frame, text=background.title(), value=background,
+                variable=self.graph_background_var, command=self.on_graph_background_selected).grid(row=0, column=column, padx=6)
 
         ttk.Label(main_frame,
                   text="High Contrast is intended for outdoor use in direct sunlight.",
