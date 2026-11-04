@@ -1,17 +1,20 @@
 # Transfer statistics and XBee RSSI
 
-Implemented on **2026-10-20** on `feature/transfer-statistics`. The satellite's
-Lab 8 firmware and radio remain unchanged. This feature build adds transfer
-measurements and optional ground-radio API support to the GCS.
+Originally implemented on **2026-10-20**; included in completed `main` builds.
+Transfer measurements and ground-radio API/RSSI are GCS functions. Use the final
+firmware/radio setup in the [README](../README.md); statistics do not reprogram
+the radios.
 
 ## Live graphs and exports
 
-Every Remote Files download and ZMODEM send/receive automatically starts a
+Every Remote Files upload/download, camera-image download and ZMODEM send/receive starts a
 recording. Directory listings and ordinary serial commands do not count as file
 transfers. Open **Transfer Stats**, choose a session, and use **Show live graphs**.
 The graph window uses the same PyQtGraph system as telemetry plots and has two
-aligned plots: useful file download/upload rate in **B/s**, and ground receiver
-RSSI in **dBm**. It remains available after completion, cancellation, or failure.
+aligned plots: useful file download/upload rate in **B/s** (automatic SI prefixes
+may display kB/s), and ground receiver RSSI in **dBm**. Enable **Overlay RSSI on
+speed graph (right dBm axis)** to combine them without changing either series;
+white/black graph formatting is independent of the UI theme. It remains available after completion, cancellation, or failure.
 Closing the graph window does not discard the recording.
 
 The tab shows the current one-second rate, average, unique file bytes, elapsed
@@ -114,10 +117,11 @@ The GCS already supports 115200 through the Connection tab's **Baud Rate**
 selector. Speed graphs and API/RSSI support use the selected rate; no GCS code
 change is needed. Before selecting it, configure the ground XBee BD to 115200,
 configure the satellite XBee BD to 115200, and upload the matching
-**esp32thing_plus_115200** firmware environment. The normal **esp32thing_plus**
-firmware environment stays at 9600 for rollback.
+**esp32thing_plus_115200_camera_cs27** environment for the confirmed GPIO27
+setup, or its GPIO12 variant only with original wiring. For a GPIO27 slow
+comparison use **benchmark_9600_cs27**; **esp32thing_plus** stays GPIO12/9600.
 
-See the [115200 firmware setup and rollback procedure](https://github.com/chasedustevichusafa/Lab-8-Wireless-Image-Capture-and-Transmission/blob/feature/high-baud-link/Astro-331-2026-Fall/Astro331_Lab8_Code/README.md#optional-115200-baud-test).
+See the [115200 firmware setup and rollback procedure](https://github.com/chasedustevichusafa/Lab-8-Wireless-Image-Capture-and-Transmission/blob/main/Astro-331-2026-Fall/Astro331_Lab8_Code/README.md#optional-115200-baud-test).
 Keep each radio's API/transparent mode, pairing, and network/security settings
 unchanged. In the API-mode instructions above, substitute 115200 for 9600 only
 after changing the radio's BD setting. Do not use 115200 with the old 9600 firmware.
@@ -142,8 +146,9 @@ traffic. Measuring the satellite's receive RSSI is a separate future feature.
 Readings older than two seconds, periods with no fresh packet, disabled polling,
 and unavailable DB responses appear as gaps. Unsupported DB queries do not stop
 file transfers. The tab reports a DB/connection diagnostic when available. No
-fake zero-dBm samples are inserted. RSSI acquisition and API-mode behavior still
-need validation on your physical radio pair.
+fake zero-dBm samples are inserted. The owner confirmed API/RSSI operation on
+the working radio pair; validate freshness and source behavior again when
+changing radios or configuration.
 
 ## Verification and Windows build
 
@@ -160,7 +165,7 @@ transmit errors/timeouts, RSSI pacing, shutdown, and KFS downloads through a
 simulated API radio. The existing Lab 8 C++/Python compatibility tests remain
 applicable. Automated tests do not establish physical radio performance.
 
-**Windows test build** runs on pushes to `feature/remote-upload` and the earlier feature branches as well as
-`main` and the existing file-transfer branch. Download the completed run's
+**Windows test build** runs on main pushes/merges, relevant pull requests and
+manual dispatches (along with the development branches listed in the workflow). Download the completed run's
 `KestrelSAT-GCS-Windows-<commit>` artifact while signed into GitHub, extract it,
 and run `KestrelSAT_GCS.exe`. This workflow does not publish a release.

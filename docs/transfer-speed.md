@@ -1,14 +1,14 @@
-# Transfer-speed test builds — 2026-10-27
+# Transfer-speed profiles — updated 2026-11-04
 
-The `feature/transfer-speed` branches add negotiated speed profiles to **Remote
+The merged `main` builds provide negotiated speed profiles to **Remote
 Files** and **Camera** downloads, Camera **View**, and file uploads. Image capture
-still saves one JPEG to SD; viewing downloads it after capture. There is no live
-preview. Keep the confirmed hardware and radio settings for the first comparison.
+still saves one JPEG to SD; viewing downloads it after capture. Periodic capture/download preview is available in the separate
+[Live Preview tab](live-preview.md). Keep the confirmed hardware and radio settings for the first comparison.
 
 ## Install and compare
 
 1. Download the matching GCS Windows artifact and Lab 8 firmware source artifact
-   from successful Actions runs on `feature/transfer-speed`. Extract each ZIP.
+   from successful Actions runs on `main`. Extract each ZIP.
 2. Open the firmware project in PlatformIO and upload
    `esp32thing_plus_115200_camera_cs27` for the confirmed GPIO27 camera wiring.
    The other three original baud/CS environments remain available. USB startup
@@ -98,3 +98,13 @@ Previous main builds remain available for a complete software rollback.
   checksums and twenty consecutive image-sized downloads.
 - Full GCS regression runner and all four PlatformIO builds. These establish
   software behavior and compilation, not measured on-air performance.
+
+## Owner-reported hardware results — completion update 2026-11-04
+
+The owner reported approximately **1500 B/s Baseline**, **3850 B/s Auto/Fast**
+and **4700 B/s Experimental**, then confirmed the merged builds worked. These
+are observed useful download rates for that setup, not guaranteed performance,
+upload measurements or a change to RF bitrate. Experimental's batch 2 keeps at
+most two data commands outstanding and waits for both before continuing. Auto
+continues to use Fast without batching. Keep the comparison procedure above
+when measuring another distance, image or radio configuration.

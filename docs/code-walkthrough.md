@@ -1,7 +1,7 @@
 # Reading the current GCS code — 2026-10-23
 
 The source comments explain the working implementation. **2026-10-27 update:**
-the speed-test branch now implements negotiated transfer profiles; see
+the merged main builds implement negotiated transfer profiles; see
 [transfer-speed tests](transfer-speed.md). Radio settings remain unchanged.
 
 **2026-10-29 update:** `preview.py` owns one capture/download/display/cleanup cycle,
@@ -16,7 +16,7 @@ measurement semantics. Current camera/file firmware commands are reused.
 2. `remote_tab.py` captures a file action on Tk's thread and starts a worker with
    exclusive serial-read ownership. `camera_tab.py` extends this lifecycle for
    capture/status and on-demand viewing. Generation IDs reject stale UI results.
-3. `remote_files.py` implements KFS1 requests: newline-delimited fields, hex data,
+3. `remote_files.py` implements KFS1 requests: newline-delimited fields, legacy hex or negotiated hex/Base64 data,
    CRC32, same-ID retries and complete-file verification. `camera_files.py` adds
    capture identity/status recovery; pixels still use the normal file download.
 4. With API mode selected, `xbee_api.py` wraps this payload stream in ground-radio

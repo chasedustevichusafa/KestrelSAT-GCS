@@ -154,7 +154,8 @@ Metadata-only JSONL diagnostics remain under `transfer_diagnostics/`.
 - `tests/run_all.py` includes the portable preview suite. Linux GUI checks use
   `QT_QPA_PLATFORM=offscreen xvfb-run -a python tests/run_all.py`.
 
-Windows artifacts build on `feature/live-camera-preview`, pull requests and main.
+Use the current successful main Windows artifact; pull requests also validate
+the preview suite before packaging.
 The existing Lab 8 `esp32thing_plus_115200_camera_cs27` firmware remains compatible.
 Automated checks establish software behavior; use your camera/radios to verify
 achieved refresh intervals and long-running stability.

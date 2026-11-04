@@ -1,14 +1,14 @@
 # Remote file management — 2026-10-21
 
-Use matching GCS and Lab 8 source downloads from `feature/remote-file-management`.
+Use matching GCS and Lab 8 source downloads from `main`.
 The project owner confirmed the preceding upload build works on hardware. These
-new delete/rename operations have passed automated tests; hardware testing is pending.
+delete/rename operations have passed automated tests and the owner confirmed the completed file-management workflow.
 
 ## Use the buttons
 
 1. Upload the extracted Lab 8 project with PlatformIO environment
-   `esp32thing_plus_115200` for the existing 115200 radios. The USB startup marker
-   is `KFS1 manage-1`. The default `esp32thing_plus` environment remains 9600.
+   `esp32thing_plus_115200_camera_cs27` for the confirmed GPIO27/115200 setup. The USB startup marker
+   is `KFS1 speed-1`. The default `esp32thing_plus` environment remains 9600.
 2. Launch the matching GCS executable. Keep the working radio configuration:
    satellite AP=0; ground AP=1 with GCS XBee API (AP=1) for RSSI, or ground AP=0
    with GCS Transparent. The existing legacy AO=2 API format remains supported.

@@ -1,275 +1,217 @@
 # KestrelSAT Ground Control Station
 
-A Python GUI for talking to serial devices and plotting their telemetry in real time.
-Built for the USAFA ASTRO space systems engineering course.
+A Python desktop ground station for the USAFA ASTRO KestrelSAT project: serial
+telemetry, verified XBee file transfers, camera capture and periodic preview,
+transfer measurements, and dedicated RSSI/range tracking. Tkinter/ttk supplies
+the main interface; PyQtGraph/PyQt5 supplies the graph windows.
 
-The interface is tkinter/ttk; the plot opens in a separate PyQtGraph window for fast,
-interactive rendering of live data.
+**Project completion documentation: November 4, 2026 (America/Denver).**
+The owner confirmed the completed file, camera, preview and link-tracking
+workflows, and the feature branches have been merged into this fork's `main`.
+Use the current `main` builds of both repositories. Earlier development notes
+and test proposals are not additional installation requirements.
 
-## Features
+## Start with the completed setup
 
-- **Live Preview**: On-demand camera tab with selectable resolution and 5/10-second
-  refresh targets, embedded images, Save frame, automatic cleanup of displayed
-  preview images, and capture/delete recovery. See [Live Preview](docs/live-preview.md).
-- **Connection Management**: Connect and disconnect with a visual status indicator
-- **Port Detection**: Automatic detection and listing of available serial ports
-- **Flexible Configuration**: Baud rate, data bits, parity, and stop bits
-- **Test Mode**: Generates synthetic telemetry so the app can be used without hardware
-- **Real-time Data**: Live reception on a background thread, so the GUI stays responsive
-- **Data Display Options**: Text or hexadecimal, optional timestamps, auto-scroll
-- **Data Transmission**: Send text with optional line endings
-- **Real-time Plotting**: Multi-channel plots with per-channel colours, thickness, dot
-  size, custom names, and visibility toggles
-- **Multiple Plots**: Add as many plot tabs as you need with `+`; each has its own
-  window and is configured independently
-- **Logging**: Continuous logging to file with a live file-size readout, plus one-shot
-  display captures
-- **Appearance Themes**: Dark, Light, and High Contrast, applied instantly without restarting
-- **High-DPI Aware**: Scales itself to stay readable on 4K and other high-resolution displays
-- **ZMODEM File Transfer**: Send and receive files over the same serial link, compatible with
-  `sz`/`rz`, TeraTerm, minicom and other standard ZMODEM tools
-- **Remote SD Files**: Browse satellite folders and upload/download files over XBee with
-  progress, cancellation, retries, and whole-file checksum verification; rename or delete SD files
-- **Camera**: Remotely capture a JPEG at a supported resolution, save it on SD,
-  then view/download, rename or delete it. Filenames use local request time and resolution.
-- **Status Bar**: Connection status and samples-per-second
-- **Resize-safe**: a minimum window size plus scrollable panels, so no control
-  can be pushed out of reach; Send Data and the monitor controls always stay visible
+1. Download the GCS from a successful **main** run of
+   [Windows test build](https://github.com/chasedustevichusafa/KestrelSAT-GCS/actions/workflows/build-windows.yml).
+   Under **Artifacts**, select `KestrelSAT-GCS-Windows-<commit SHA>`. Sign into
+   GitHub, extract the ZIP, then run `KestrelSAT_GCS.exe`; Python is not required
+   for the packaged executable. Close other GCS instances and XCTU first.
+2. Get the matching [Lab 8 firmware source](https://github.com/chasedustevichusafa/Lab-8-Wireless-Image-Capture-and-Transmission/actions/workflows/lab8-firmware.yml).
+   Extract `KestrelSAT-Lab8-Firmware`, open `KestrelSAT-Lab8` in PlatformIO, and
+   upload `esp32thing_plus_115200_camera_cs27` for camera CS wired to GPIO27.
+   Select the environment explicitly: PlatformIO's default remains GPIO12/9600.
+3. Use the settings below. Firmware selection does not program the radios;
+   write UART/AP/address settings separately in XCTU, then close XCTU.
+4. In **Connection**, select the ground-radio COM port, **115200**, **8N1**, and
+   **XBee API (AP=1)**. Connect, then use **Remote Files → Refresh / Open** or
+   **Camera → Refresh images**. Begin with a small verified file/capture.
+5. Keep the executable in a writable folder. Settings, logs, downloaded images,
+   recordings and diagnostics are relative to the launch working directory.
+   Preserve exported CSV bundles as well as PNGs for later analysis.
 
-## Reopen Link Tracker CSV bundles (2026-11-03)
+| Component | Completed working configuration |
+| --- | --- |
+| Satellite PlatformIO environment | `esp32thing_plus_115200_camera_cs27` |
+| Board identifier | `sparkfun_esp32s2_thing_plus_c`, retained from the working labs |
+| Camera chip select | GPIO27; match the physical wire |
+| Satellite firmware ↔ satellite XBee UART | 115200 baud, 8N1; satellite radio **AP=0** |
+| GCS ↔ ground XBee UART | 115200 baud, 8N1; ground radio **AP=1**, GCS **XBee API (AP=1)** |
+| Radio destination addressing | Unicast: each radio's DH/DL equals its peer's SH/SL |
+| Other radio settings | Retain the working network/security settings and MAC acknowledgments |
+| USB Serial Monitor | 115200; independent of the XBee UART baud |
+| Normal transfer profile | Auto (Fast with FAST1 firmware); Experimental is an explicit comparison option |
 
-Link Tracker now offers **Open CSV bundle...** and **Open session folder...** to
-rebuild saved RSSI, success, latency and distance graphs without a radio. Original
-timing, markers and verification flags are preserved; PNG export and white/black
-styles remain available. Optional source rechecking can recover earlier
-unverified RSSI using a known address such as `0000`, with the analysis choice
-labelled and the original files unchanged. See [Link Tracker](docs/link-tracker.md#rebuild-saved-graphs--2026-11-03).
+### Transparent, API, broadcast and unicast
 
-## Graph formatting (2026-11-03)
+**AP=0 (transparent)** passes ordinary serial bytes, like a wireless serial cable.
+**AP=1 (API)** frames traffic between the local radio and its attached computer,
+allowing the GCS to identify receive sources, inspect transmit status and query
+radio diagnostics. The GCS handles legacy `0x80`/`0x81` and modern `0x90`/`0x91`
+receive frames; the lab profile's legacy AO output is supported.
+The ground radio strips/adds its API envelopes locally, so the satellite still
+uses AP=0. Both ends transparent also support file transfers, but API diagnostics
+and the dedicated Link Tracker require the ground API connection.
 
-All graphs default to white. Choose **Options → Graph Background → White / Black**
-(or Preferences) to change graph backgrounds independently of the main UI theme.
-Telemetry, Transfer Stats, Link Tracker and PNG exports follow this preference.
-Transfer Stats also offers **Overlay RSSI on speed graph (right dBm axis)**,
-with shared time, independent rate/dBm scales and preserved missing-data gaps.
-See [Graph formatting](docs/graph-formatting.md) for export behavior.
+AP mode does not select broadcast/unicast or increase RF bitrate. The supplied
+lab profile's `DH=0, DL=FFFF` is broadcast. For the working unicast setup, read
+both radios' SH/SL and set **ground DH/DL = satellite SH/SL**, and **satellite
+DH/DL = ground SH/SL**, then write both radios and reconnect the GCS. A higher
+UART baud removes a serial bottleneck; RF packet overhead and retries still
+limit useful transfer speed.
 
-## Dedicated Link Tracker (2026-10-30)
+## Completed features and operating guides
 
-The **Link Tracker** tab records RSSI and round-trip reliability without file
-transfers or firmware changes. Choose 1/2/5 probes per second (10 Hz experimental),
-then Start tracking. Packet RSSI avoids DB polling on legacy API frames; other
-formats use a fresh-packet DB fallback near 1 Hz. Resizable graphs show RSSI,
-success, latency and optional distance checkpoints. Raw CSV logging, PNG exports
-and a complete CSV bundle support long range tests. Start with 2 Hz using your
-working API/unicast setup. See [Link Tracker](docs/link-tracker.md) for source
-verification, freshness, sampling limits and the test procedure.
+| Page or feature | What it does | Detailed guide |
+| --- | --- | --- |
+| Connection / serial monitor | Port detection, serial settings, text/hex, timestamps, send controls, logging and TEST MODE | [Usage](#usage) |
+| Telemetry plots | Independent multi-channel plot tabs, labels, colours, visibility, scaling and resizable windows | [Plotting](#plotting) |
+| Remote Files | Browse SD folders; upload/download with CRC32 verification; cancel; rename/delete; remove reserved partial uploads | [Remote files](docs/remote-files.md), [uploads](docs/remote-upload.md), [management](docs/remote-file-management.md) |
+| Camera | Select supported resolution, capture JPEG to SD, View/Download, Rename/Delete and recover a pending capture | [Camera](docs/camera.md) |
+| Live Preview | Opt-in 5/10-second refresh targets, selectable resolution, Save frame, preview-only SD cleanup and native-pixel pop-out | [Live Preview](docs/live-preview.md) |
+| Transfer profile | Baseline, Larger blocks, Compact, Fast, Experimental and automatic legacy fallback | [Transfer speed](docs/transfer-speed.md) |
+| Transfer Stats | Live useful upload/download rate, optional ground RSSI, session CSV and PNG exports | [Measurements and RSSI](docs/transfer-statistics.md) |
+| Recordings | One timeline across operations, idle gaps and reconnects; combine finished sessions; summary/event CSVs | [Multi-operation recordings](docs/multi-operation-recordings.md) |
+| Link Tracker | Dedicated RSSI/probe-success/latency logging, distance checkpoints, CSV bundles and offline reconstruction | [Link Tracker](docs/link-tracker.md) |
+| Graph formatting | Independent white/black graphs; RSSI over speed using a separate right-hand dBm axis | [Graph formatting](docs/graph-formatting.md) |
+| Standard ZMODEM | Separate interoperability with sz/rz and compatible terminal tools; not the Lab 8 KFS1 protocol | [ZMODEM](#file-transfer-zmodem) |
+| Source documentation | Detailed comments explaining serial ownership, protocol, SD, camera jobs and GUI lifecycle | [Code walkthrough](docs/code-walkthrough.md) |
 
-## Combined transfer ordering fix (2026-10-30)
+### Remote files, camera and preview
 
-Combined CSV exports now preserve the selected order when short transfers share
-the same clock tick, while still sorting distinct start times chronologically
-and removing duplicate selections. This also fixes an intermittent Windows build
-test failure caused by unordered ties.
+Uploads require an existing destination folder and a new name. They write a
+reserved temporary file, verify stored size/CRC by SD read-back, then publish the
+final name without replacing existing files. Downloads verify the complete file
+before replacing the local destination. Interrupted transfers restart rather
+than resume. Rename operates within the current folder; Delete is permanent and
+asks for confirmation. Use **Remove partial...** only for reserved `.kfs-` files.
 
-## Transfer statistics and RSSI (2026-10-20)
+**Camera** captures one still without starting preview. Filenames contain the
+**GCS local request time**, UTC offset, resolution and unique job suffix, for
+example `20261021T153045-0600_640x480_a14f9082.jpg`; this is not a satellite RTC
+or exact shutter timestamp. Use **View** to download/display the saved JPEG.
+**Stop waiting** does not cancel an accepted onboard exposure; reconnect and use
+**Check capture** before requesting another image.
 
-The **Transfer Stats** tab records live download/upload rates for file transfers,
-retains sessions, and exports PNG graphs and CSV measurements. Optional ground
-receiver RSSI is sampled through an **XBee API (AP=1)** connection; transparent
-mode continues to support file transfers and rate graphs.
+**Live Preview** repeatedly captures, verifies, downloads and displays still
+JPEGs. It is off until Start; 5/10 seconds are start-to-start targets, not a video
+frame-rate guarantee. Only the exact preview-created image is automatically
+deleted, after verified download and successful display. Ordinary still images
+remain on SD. **Save frame...** keeps the current JPEG on the PC. **Pop out image**
+opens a resizable window displaying native image pixels with scrollbars, without
+resizing the image. The resolution/refresh guide and per-frame byte budget are
+based on reported speed tiers; scene-dependent JPEG sizes and capture/SD time
+can cause overruns. Pending capture/delete identities have explicit recovery
+controls and never automatically restart preview after reconnect.
 
-See [transfer graphs, measurement definitions, and XCTU API-mode setup](docs/transfer-statistics.md)
-before changing the ground XBee. Satellite firmware is unchanged. These changes
-are included in the current upload feature build.
+### Transfer profiles and measured speed
 
-## Multi-operation recordings (2026-10-21)
+| Profile | Useful bytes per block | Encoding | Requests per batch |
+| --- | ---: | --- | ---: |
+| Baseline | 128 | Hex | 1 |
+| Larger blocks | 256 | Hex | 1 |
+| Compact | 256 | Base64 | 1 |
+| Fast | 512 | Base64 | 1 |
+| Experimental | 512 | Base64 | 2 |
+| Auto | Fast with FAST1 firmware; otherwise Baseline | Negotiated | 1 |
 
-In **Transfer Stats**, choose **Start recording...**, run multiple transfers, then
-**Stop recording**. One timeline retains upload/download rates, RSSI, idle gaps,
-operation outcomes and connection changes. Export full measurements, an operation
-summary CSV, and PNG graphs of the full timeline or your zoomed view. **Combine
-transfers...** also combines finished sessions from the current app run using
-their original timing. Individual transfer recordings remain available.
+**Batch 2** means at most two data requests are sent before both must be
+confirmed. It is not a two-byte block or two simultaneous transfers. Retries
+retain request IDs; full-file checks, SD sync/read-back and overwrite protection
+remain in place. Profiles do not change baud, radio AP/addressing or camera
+resolution. The actual negotiated profile is recorded in current CSVs/headers.
 
-See [recording instructions, data definitions and limits](docs/multi-operation-recordings.md).
-Use the Windows artifact on `feature/multi-operation-recordings`; existing firmware
-and radio settings remain compatible.
+The owner reported roughly **1500 B/s Baseline**, **3850 B/s Auto/Fast**, and
+**4700 B/s Experimental** on the working setup. These are observed download
+figures, not guaranteed rates, upload benchmarks or RF bitrates. Compare the same
+saved file, position and settings; retain complete durations, failures and retry
+counts. The [speed guide](docs/transfer-speed.md) explains controlled comparisons.
 
-## Camera capture (2026-10-21)
+### Recording, graph exports and offline replay
 
-**2026-10-22 hardware confirmation:** The owner confirmed camera capture and
-GPIO27 operation and reported a working stopping point. The confirmed setup uses
-`esp32thing_plus_115200_camera_cs27`, 115200-baud radios, satellite AP=0,
-ground AP=1/GCS API mode, and unicast destinations on both radios. The same-image
-unicast downloads completed in 22.407 s with RSSI off and 22.411 s with it on,
-with zero protocol timeouts/retries in either run. RSSI can remain enabled.
-See [the measured results and radio setup](docs/camera.md#confirmed-hardware-setup-and-transfer-results--2026-10-22).
+In **Transfer Stats**, start a named recording before several operations and
+stop it afterwards. Original elapsed time, idle intervals, operation outcomes
+and connection events are retained. **Combine transfers...** combines sessions
+from the current app run in original time order; it does not remove idle gaps.
+Export measurements, operation summaries and PNGs before closing the app.
 
-**2026-10-22 follow-up:** Camera-2 firmware extracts JPEG frames from the camera
-FIFO, uses the vendor's SD-example read method, and can retry failed detection
-through Refresh images. The GCS records FIFO/image byte counts and boundary
-samples for failed captures. An optional GPIO27 camera-CS firmware environment
-supports investigating GPIO12 boot/flash interference. See the
-[hardware report, fixes and upload procedure](docs/camera.md#camera-test-follow-up--2026-10-22).
+Graphs default to **white**. **Options → Graph Background → White / Black**
+(or Preferences) changes graph appearance independently of the UI theme.
+**Overlay RSSI on speed graph (right dBm axis)** combines rate and RSSI on a
+shared time axis while keeping independent units. Missing RSSI remains a gap;
+formatting does not change recorded data. PNG export supports the full timeline
+or current graph view. A rate of zero alone is not a serial disconnection.
 
-Use matching GCS and Lab 8 artifacts from `main` after merge, or
-`feature/remote-camera` while testing this PR. Open **Camera →
-Refresh images**, choose a supported resolution and **Capture image**. Once SD
-verification finishes, use **View** to download and display the saved JPEG or
-**Download...**, **Rename...** and **Delete...** to manage it. No live preview is
-started. Keep the confirmed wiring and radio settings; upload
-`esp32thing_plus_115200_camera_cs27` for camera CS on GPIO27. The
-`esp32thing_plus_115200` environment retains the original GPIO12 wiring.
-See [camera instructions and recovery](docs/camera.md).
+**Link Tracker** generates dedicated probes without transferring a file. Start
+at **2 Hz**; 1/2/5 Hz and experimental 10 Hz are available, with one outstanding
+probe and no automatic retries that would hide failures. It measures received
+satellite-to-ground RSSI, round-trip probe success and round-trip latency, not
+symmetric link strength. Legacy receive frames carry packet RSSI; other formats
+use a fresh-packet DB fallback near 1 Hz. Actual sampling depends on the radio.
+
+If success/latency appears but RSSI is blank, inspect **RX source** in the summary.
+For legacy 16-bit frames, **Expected receive source** must match the satellite
+radio's **MY** address, which can be `0000`; its 64-bit SH/SL unicast destination
+cannot verify a 16-bit source by itself. Source verification and freshness are
+required for RSSI. The blue band shows the rolling RSSI minimum-to-maximum range around the
+median, not another radio or extra raw measurements; see the
+[graph definitions](docs/link-tracker.md).
+
+Export the complete **CSV bundle** (session metadata, probes, packets and events).
+**Open CSV bundle...** or **Open session folder...** reconstructs Link Tracker
+plots offline without a radio. Optional source rechecking is explicit and
+labelled, and leaves original files unchanged. General transfer CSV import is
+not a Link Tracker bundle: keep each export with its matching feature.
+
+## Downloads, old versions and recovery
+
+GitHub Actions artifacts are tied to a specific run/commit and require a GitHub
+login. The Windows test artifact is retained for **14 days**; the firmware source
+artifact for **30 days**. Older unexpired successful runs can be downloaded from
+Actions. Expired/deleted artifacts cannot be retrieved, but committed source
+remains in Git history: check out the desired commit or manually run the workflow
+at an available branch/tag containing it. A manual **Windows test build** creates
+an artifact; the separate **Build Windows executable** release workflow publishes
+a versioned release and should only be used when a release is intended.
+
+For a matching rollback, retain both source commit IDs, radio profiles, selected
+firmware environment and exported datasets. A pre-speed firmware still works
+with Auto's legacy fallback, but explicit fast profiles require FAST1. Older
+firmware may lack camera/upload/management capabilities; the UI detects them.
+
+If **XBee API reply timed out** occurs before Connected, verify the adapter is
+plugged in, the COM port, matching ground-radio baud/AP and that XCTU/other GCS
+instances are closed. A **Satellite did not reply** message after connecting
+also requires checking satellite firmware baud, AP=0, peer addresses, power and
+SD readiness. SD `READ_FAILED` is a different failure: retain the reported
+byte offset and [diagnostics](docs/file-transfer-stability.md), and use the USB
+`SDCHECK` procedure if needed. Do not infer an SD fault from a zero-rate interval.
+
+The confirmed GPIO27 setup addresses the earlier camera-attached flashing issue.
+Select the matching CS environment. If flashing still fails, power down before
+disconnecting/reconnecting camera wiring and follow the
+[camera recovery guide](docs/camera.md); retain flash verification checks.
+
+## Completion record — 2026-11-04
+
+- Consolidated the merged file-transfer, camera, preview, speed, statistics,
+  graph-formatting and Link Tracker/offline-replay documentation.
+- Replaced obsolete feature-branch installation instructions with current main
+  artifacts, final GPIO27/115200/API/unicast settings and accurate retention rules.
+- Recorded owner-confirmed operation and reported speed tiers. Repeated-transfer
+  reliability and range are properties of the tested setup, not universal
+  guarantees. Automated tests establish software behavior, not RF coverage.
+- Retained the original telemetry/ZMODEM usage, licensing and source-build guidance
+  below. Labs 4/5 remain firmware reference projects; Lab 8 is the deployed service.
 
 ## Requirements
 
-- Python 3.10 or newer (required by the pinned `pyqtgraph`)
-- tkinter (bundled with the standard Windows and macOS Python installers; on Debian or
-  Ubuntu install `python3-tk`)
-- The packages in `requirements.txt`: `pyserial`, `pyqtgraph`, `PyQt5`, and `Pillow`
+- Python 3.10 or newer when running source (the packaged Windows exe needs no Python).
+- tkinter (bundled with standard Windows/macOS Python; Debian/Ubuntu `python3-tk`).
+- Pinned dependencies in `requirements.txt`: pyserial, pyqtgraph, PyQt5 and Pillow.
 
-PyQtGraph and PyQt5 are only needed for the plot window. If they are missing the app still
-starts and the serial monitor works; plotting is disabled with a warning on the console.
-
-## Remote satellite files (Lab 8)
-
-The **Remote Files** tab browses the satellite SD card and transfers files over
-the existing XBee connection. It requires the matching `Astro331_Lab8_Code`
-firmware and supports verified uploads/downloads, progress, retries, and cancellation.
-See [setup, Windows executable download, and hardware test instructions](docs/remote-files.md).
-The new Camera tab adds single-image capture and on-demand viewing; see [camera setup](docs/camera.md). Live streaming remains outside this feature.
-
-Use the [matching Lab 8 firmware](https://github.com/chasedustevichusafa/Lab-8-Wireless-Image-Capture-and-Transmission/tree/feature/remote-camera/Astro-331-2026-Fall/Astro331_Lab8_Code).
-Connect to the ground XBee COM port at **9600 baud, 8N1** for the default firmware,
-or **115200 baud, 8N1** with the matching `esp32thing_plus_115200` firmware and
-radio UART settings, then open
-**Remote Files → Refresh / Open**. Double-click folders or select a file and
-choose **Download...**. Downloads preserve SD contents; uploads use verified temporary files and require a new name.
-Both directions restart after interruption. See [upload setup, recovery and tests](docs/remote-upload.md).
-
-### Delete and rename files (2026-10-21)
-
-Use matching `feature/remote-file-management` builds of the GCS and firmware.
-After **Refresh / Open**, select a file and choose **Rename...** or **Delete...**.
-Delete asks for confirmation of the full satellite path and permanently removes
-that file. Rename keeps the current folder and rejects existing names, including
-case-only renames. Folders are excluded; unfinished uploads use **Remove partial...**.
-See [setup, recovery and tests](docs/remote-file-management.md). Uploads were
-confirmed working on hardware; the new management controls still need that check.
-
-### Radio configuration and validation (2026-10-21)
-
-The project owner confirmed that the 115200-baud configuration connects and the
-Remote Files feature works with both radios in transparent mode. For API/RSSI
-testing, use the following settings with the updated feature-build executable:
-
-| Component | UART baud | Mode |
-| --- | --- | --- |
-| Satellite firmware | 115200 | `esp32thing_plus_115200` environment |
-| Satellite XBee | 115200 | AP=0 (transparent) |
-| Ground XBee | 115200 | AP=1; existing AO=2 legacy output supported |
-| GCS Connection tab | 115200 | XBee API (AP=1) |
-
-The ground radio was confirmed to use legacy 802.15.4 receive indicators. The
-GCS now handles these `0x80`/`0x81` frames alongside `0x90`/`0x91`. All 12 GCS
-test suites passed, including simulated legacy-frame browsing/downloads and
-RSSI polling, and the Windows executable built successfully. Physical testing
-of the corrected API/RSSI connection is still pending.
-
-Download feature builds from [Windows test build Actions](https://github.com/chasedustevichusafa/KestrelSAT-GCS/actions/workflows/build-windows.yml).
-Choose a successful run on `feature/remote-camera`, download its Windows
-artifact while signed into GitHub, and extract it before launching the executable.
-
-### File-transfer stability investigation (2026-10-21)
-
-The `fix/file-transfer-stability` branch adds per-operation diagnostic captures
-in `transfer_diagnostics/`, including failed offsets, request timing, retry and
-invalid-frame counts, final outcome, and radio counters. The monitor prints the
-capture path after each operation. File payloads are excluded; successful read
-checkpoints are sampled once per second, and each capture rotates at 2 MiB with
-one backup. Failure to record diagnostics does not abort a transfer.
-
-The matching [stability firmware](https://github.com/chasedustevichusafa/Lab-8-Wireless-Image-Capture-and-Transmission/tree/fix/file-transfer-stability/Astro-331-2026-Fall/Astro331_Lab8_Code)
-retries transient SD reads from the same offset up to three times and provides
-USB-only SD diagnostics. A permanent read failure still stops safely and reports
-its offset. Fault injection reproduced the old fatal-read behavior; recovery is
-tested in simulation. The physical source of the reported failures and the
-hardware reliability target remain to be established.
-
-Follow the [diagnostic procedure and hardware acceptance checklist](docs/file-transfer-stability.md).
-
-### Dated changes
-
-- **2026-10-29 — Preview pop-out and recommendations:** Added a resizable native
-  pixel window for the live camera pane, with scrollbars and shared status/Save
-  controls. Added a hardcoded resolution/refresh guide for the reported 1500,
-  3850 and 4700 B/s tiers, plus current-frame size-budget advice. Window resizing
-  preserves the captured pixels. Existing firmware remains compatible.
-
-- **2026-10-29 — Live Preview:** Added an opt-in periodic camera panel, resolution
-  and 5/10-second controls, actual frame timing, verified display-before-delete
-  cleanup, bounded local cache and Save frame. Pending capture/delete identities
-  survive disconnect/restart. Preview cooperates with existing file/statistics
-  workflows and uses the current firmware. Branch and main Windows artifacts
-  include the new regression suite. Hardware refresh/stability testing is pending.
-
-- **2026-10-27 — Transfer-speed experiments:** Added a shared transfer-profile
-  selector for Camera and Remote Files, negotiated 256/512-byte blocks, compact
-  Base64, optional two-request batches, and actual profile labels in CSV/graphs.
-  Auto uses Fast with matching firmware and falls back with older firmware;
-  Baseline retains 128-byte hex transfers. See the
-  [installation and comparison procedure](docs/transfer-speed.md). Hardware
-  speed/reliability results are pending; existing radio settings are retained.
-
-- **2026-10-23 — Code walkthrough:** Added explanatory comments throughout the
-  current application: protocol framing/retries, serial ownership, camera jobs,
-  SD verification, measurements/recordings, plotting and GUI lifecycle. See the
-  [source reading guide](docs/code-walkthrough.md). Application behavior and
-  transfer settings are unchanged; speed experiments remain future work. The
-  Windows workflow also builds this documentation branch and retains main builds.
-
-- **2026-10-21 — Remote still-image capture:** Added the Camera tab, detected
-  resolution choices, local-time filenames, SD capture status/recovery and static
-  JPEG viewing. Reuses verified downloads, rename/delete and existing statistics.
-  Matching Lab 8 firmware is required; physical camera testing is pending.
-
-- **2026-10-21 — Multi-operation statistics:** Added named continuous recordings,
-  original-time combining of finished transfers, partial-capture markers, durable
-  measurement/operation/event CSVs, and full-timeline or current-view PNG exports.
-  Firmware is unchanged. Physical multi-operation validation is pending.
-
-- **2026-10-21 — File management:** Added confirmed file deletion, same-folder
-  rename, MANAGE1 capability detection, duplicate-request replay and lost-reply
-  recovery. All 12 GCS suites, 24 firmware protocol tests and both firmware
-  baud-rate builds passed. Delete/rename hardware testing is pending.
-- **2026-10-21 — Upload hardware result:** The project owner confirmed that the
-  upload build works. This is not a measured repeated-transfer acceptance result.
-
-- **2026-10-21 — Verified uploads:** Added upload and partial-file cleanup controls,
-  capability detection, upload-rate/RSSI statistics and bounded write/verification
-  diagnostics. Matching firmware protects existing names and reads stored data
-  back before publication. The project owner subsequently confirmed uploads work.
-- **2026-10-21 — Stability build hardware result:** The project owner confirmed
-  successful operation after the SD-read recovery changes. This does not establish
-  a physical root cause or a measured twenty-transfer acceptance result.
-- **2026-10-21 — Transfer stability diagnostics:** Added bounded metadata captures,
-  contextual errors, and simulated loss/corruption stress tests. Matching firmware
-  adds bounded SD read recovery and local USB SD scans; hardware validation is pending.
-- **2026-10-21 — XBee API receive compatibility:** Added legacy `0x80`/`0x81`
-  receive support for the supplied lab radio profile's default `AO=2` output.
-  API-mode file timeouts now include radio delivery and received-frame diagnostics.
-  Transparent-mode file transfers remain available while API hardware testing continues.
-- **2026-10-20 — Hardware integration confirmed:** The project owner confirmed
-  that the Windows GCS and Lab 8 firmware work together on the KestrelSAT/XBee
-  hardware for the remote file-transfer milestone.
-- **2026-10-15 — Remote Files implemented:** Added the browser/download tab,
-  KFS1 protocol client, exclusive serial-port coordination, progress and cancel
-  controls, chunk retries, and final CRC32 verification. Added automated protocol
-  and GUI tests plus the **Windows test build** GitHub Actions workflow, which
-  packages an executable without publishing a release. File-list colors follow
-  the selected theme. Camera capture and live preview remain future work.
+Without PyQtGraph/PyQt5 the serial monitor can start, but graphs are unavailable.
 
 ## Installation
 
@@ -434,7 +376,8 @@ pyinstaller KestrelSAT_GCS_v1.spec
 
 The result is a single `dist/KestrelSAT_GCS.exe` with the icon and splash screen bundled.
 
-Releases are built by GitHub Actions instead: pushing a `v*` tag runs
+The regular main/PR executable comes from **Windows test build** as described
+above. Versioned releases use a separate workflow: pushing a `v*` tag runs
 `.github/workflows/release.yml` on a Windows runner and attaches the executable to the
 release. PyInstaller does not cross-compile, so the build has to happen on Windows —
 this keeps that off anyone's laptop. The workflow also fails the build if the tag does
@@ -471,6 +414,17 @@ kestrelsat/
     theming.py                 # ThemeManager: applies a theme to the widget tree
     channels.py                # Channel record
     scaling.py                 # High-DPI display scaling
+    remote_files.py            # KFS1 client, integrity and negotiated profiles
+    xbee_api.py                # API transport, receive sources and diagnostics
+    camera_tab.py              # Still capture/view and recovery UI
+    preview.py                 # Preview scheduling and capture/cleanup ownership
+    preview_tab.py             # Preview controls and native-pixel pop-out
+    transfer_stats.py          # Rate/RSSI recordings and CSV export
+    stats_tab.py               # Transfer graphs and RSSI overlay
+    link_tracker.py            # Dedicated probe/RSSI recording
+    link_replay.py             # Validated offline CSV-bundle reconstruction
+    link_tab.py                # Link Tracker UI and graph exports
+    graph_style.py             # Independent white/black graph formatting
     zmodem.py                  # ZMODEM file transfer protocol
     widgets.py                 # ToolTip, ScrollableFrame
 tests/                         # See tests/README.md

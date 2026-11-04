@@ -1,17 +1,24 @@
 # Tests
 
-These drive the real `SerialGUI` against a real Tk interpreter, so they need a
-display. On Linux use `xvfb`; on Windows they run directly.
+Updated **November 4, 2026** for the completed project. The standard runner has
+**18 suites**, each in a separate process. Some suites are portable core tests;
+others drive the real Tk/Qt UI and need a display. On Linux use Xvfb; Windows
+runs the portable/GUI suites directly. POSIX PTY/compiler checks have additional
+platform requirements and are not evidence of physical radio/camera behavior.
 
 | file | what it covers | needs a display |
 |---|---|---|
+| `test_camera.py` | Local-time filenames, camera capabilities/jobs, static viewing, recovery, image limits, management and real Tk/API integration. | yes |
+| `test_link_tracker.py` | Probe scheduling, source-verified/fresh RSSI, failures, CSV/ZIP logs, bounded history and Tk/Qt graphs. | yes |
+| `test_graph_formatting.py` | White/black preferences, dual-axis RSSI, unchanged data, gap handling, PNG pixels and lifecycle. | yes |
+| `test_link_replay.py` | Exact offline ZIP/folder reconstruction, source rechecking, validation, re-export and isolated GUI cases. | yes |
 | `test_live_preview.py` | Frame timing, display/cleanup ownership, changed-file/CRC protection, cancellation, recovery, restart, queue saturation, local cache/Save races, native-pixel pop-out resizing/lifecycle, recommendation budgets and real Tk/API integration. | yes |
 | `test_preview_firmware.py` | Optional POSIX/C++ preview cycles against the unchanged Lab 8 service. Run separately with `--firmware /path/to/Astro331_Lab8_Code`; needs the sibling firmware sources and host compiler. | no |
 | `test_transfer_speed.py` | Negotiated profiles, binary/tail/empty transfers, batch loss recovery, API fragmentation/RSSI, legacy fallback, CSV profile labels and wire-byte counts. Real firmware interoperability is tested in Lab 8. | no |
 | `test_transfer_stats.py` | Interval rates, stalls, unique-byte accounting, CSV recording, RSSI gaps, and PNG exports. | yes |
 | `test_xbee_api.py` | AP=1 framing, AT/status/data multiplexing, RSSI polling, timeouts, and KFS downloads through a simulated radio. | no |
 | `test_remote_files.py` | KFS1 framing, paths, timeouts, browsing, downloads, cancellation, disconnect cleanup, and serial ownership through the real tab. Uses a simulated wire peer. | yes |
-| `test_themes.py` | Theme table: token parity across the three themes, colour format, WCAG contrast ratios. Parses `serial_gui.py` with `ast`, so it imports nothing. | no |
+| `test_themes.py` | Theme table: token parity across the three themes, colour format, WCAG contrast ratios. Parses `kestrelsat/themes.py` with `ast`, so it imports nothing. | no |
 | `test_scaling.py` | High-DPI scaling: detection, font/geometry scaling, the Preferences round-trip, and that repeated application does not compound. | yes |
 | `test_multiplot.py` | Multiple plot tabs: the default layout and `+` tab, adding and removing plots, renumbering (tabs and window titles), that every plot sees every line, and that configuration, data, clearing and sample numbering stay independent. | yes |
 | `test_resize.py` | Resize safety: Send Data and the monitor controls stay visible at every window height, the plot tab scrolls horizontally so no channel control is unreachable, the computed minimum size and clamped launch geometry both fit the work area, wheel events do not scroll two regions at once, and every dialog is resizable, on-screen and closes on Escape. | yes |
@@ -25,7 +32,7 @@ display. On Linux use `xvfb`; on Windows they run directly.
 ## Running
 
 ```bash
-python3 tests/run_all.py                                   # Windows
+python tests/run_all.py                                    # Windows
 QT_QPA_PLATFORM=offscreen xvfb-run -a python3 tests/run_all.py   # Linux
 ```
 
@@ -111,3 +118,23 @@ results against an independent reference. Offline UI cases verify all PNG target
 white/black styles, literal checkpoint braces, distinct duplicate-import history,
 error rollback, live-operation exclusion and shutdown during a pending load.
 The full runner and Windows artifact build include the suite.
+
+## Cross-repository checks and build workflows
+
+From this repository on POSIX with a C++ compiler and the firmware checkout:
+
+```bash
+python tests/test_preview_firmware.py --firmware ../Lab-8-Wireless-Image-Capture-and-Transmission/Astro-331-2026-Fall/Astro331_Lab8_Code
+```
+
+From the Lab 8 PlatformIO project, `python test/test_protocol.py --gcs
+/path/to/KestrelSAT-GCS -v` compiles the real C++ service/adapter and exercises
+the actual Python client. These explicit interoperability checks are separate
+from the 18-suite runner; `bench.py` is informational and is not a test gate.
+
+The Windows test-artifact workflow runs its ten selected portable/GUI feature
+suites before packaging; it does not run the complete POSIX runner. The release
+workflow runs the theme check before packaging. Firmware source packaging checks
+required files and ZIP checksum round-trips, but does not compile firmware or
+flash hardware. Use the documented PlatformIO builds and physical tests for
+those separate forms of validation.

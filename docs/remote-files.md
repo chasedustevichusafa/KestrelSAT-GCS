@@ -1,7 +1,8 @@
 # Remote SD-card files over XBee
 
-This milestone browses and downloads files already on the satellite SD card,
-including JPEGs. Camera capture and live image preview are the next milestone.
+The completed main build browses satellite SD folders and supports verified
+upload/download, rename/delete and partial-file cleanup, including saved JPEGs.
+[Camera](camera.md) and [Live Preview](live-preview.md) are separate completed tabs.
 The original File → ZMODEM commands remain available for other compatible peers;
 use the **Remote Files** tab with the Lab 8 firmware.
 
@@ -10,16 +11,19 @@ use the **Remote Files** tab with the Lab 8 firmware.
 The project owner confirmed that the Windows GCS and matching Lab 8 firmware
 work together on the KestrelSAT/XBee hardware for remote file access and transfer.
 The steps below remain the verification procedure for new builds or setups.
-Camera capture and live preview are still the next milestone.
+The owner subsequently confirmed the completed file, camera and preview workflows;
+use main artifacts and the final configuration in the [README](../README.md).
 
 ## Hardware test procedure
 
 1. In the firmware repository, open
    `Astro-331-2026-Fall/Astro331_Lab8_Code` as the PlatformIO project. Build and
-   upload its `esp32thing_plus` environment. It keeps the board identifier and
-   wiring from the working labs. Keep the SD card inserted.
+   upload `esp32thing_plus_115200_camera_cs27` for the confirmed GPIO27 camera
+   wiring. It retains the working lab board identifier. Keep the SD card inserted.
+   Other baud/CS environments remain available for matching original wiring.
 2. Start `KestrelSAT_GCS.exe`. On **Connection**, select the ground-station XBee's
-   USB COM port and **9600 baud**, 8 data bits, no parity, 1 stop bit. Connect.
+   USB COM port and **115200 baud**, 8 data bits, no parity, 1 stop bit,
+   **XBee API (AP=1)**. Keep satellite AP=0 and working unicast destinations.
 3. Open **Remote Files** and click **Refresh / Open**. The path starts at `/`.
    Double-click a folder, use **Up** to return, or enter an absolute path and
    press Enter. The list shows names, folders, and file sizes.
@@ -35,12 +39,14 @@ worker; the UI stays responsive. A canceled/failed download removes its temporar
 `.part` file and leaves an existing destination unchanged. Replacement happens
 only after whole-file verification; the save dialog asks about overwriting.
 Disconnect clears the listing, so reconnect and Refresh before selecting files.
-Downloads restart from the beginning; resumable transfers and SD writes/deletion
-are not implemented.
+Downloads and uploads restart from the beginning after interruption; resumption
+is not implemented. Verified [uploads](remote-upload.md) and protected
+[rename/delete](remote-file-management.md) are available in the current build.
 
-Both XBees must retain their working paired **transparent serial** configuration.
-The firmware does not change radio settings. Do not switch only one end's baud
-rate. At 9600 baud, downloads take time: the absolute UART ceiling is 960 bytes/s,
+Use the confirmed satellite **AP=0**, ground **AP=1 / GCS API** and unicast
+setup; both-transparent file transfers are also supported. Firmware does not
+change radio settings. Match each local firmware/GCS UART to its radio. For the
+optional 9600 comparison, the absolute 8N1 UART ceiling is 960 bytes/s,
 while encoding, request/reply pacing and radio overhead reduce useful throughput
 further. The progress display reports measured bytes/s. A delay under 0.5 seconds
 for an arbitrary file is not achievable on this link.
@@ -49,13 +55,13 @@ for an arbitrary file is not achievable on this link.
 
 The **Windows test build** workflow creates a downloadable executable artifact;
 it does not create tags or publish a release. Pushes and merges into `main`
-automatically build a fresh executable. Pushes to `feature/remote-files` also
-build, and manual runs remain available. You can run it from GitHub:
+automatically build a fresh executable. Relevant pull requests also validate
+and package the app; manual runs remain available. You can run it from GitHub:
 
 1. Open the GCS repository → **Actions** → **Windows test build**.
 2. Click **Run workflow**, select the branch containing the changes, then run it.
-   If GitHub has not registered a newly added manual workflow yet, use the build
-   automatically triggered by the feature-branch push.
+   For the completed project select `main`; use a specific available ref for
+   a deliberate comparison build.
 3. Open the completed green run. Under **Artifacts**, download
    `KestrelSAT-GCS-Windows-<commit>` and unzip it.
 4. Run `KestrelSAT_GCS.exe`. `SHA256.txt` records its checksum. Python is not
@@ -67,15 +73,17 @@ PyInstaller and Pillow, then run `python -m PyInstaller --noconfirm KestrelSAT_G
 
 ## Protocol and validation
 
-KFS1 uses ASCII lines with request IDs, CRC32-protected frames, hex-encoded paths
-and file data. Hex avoids both binary/text ambiguity and `+++` in radio payloads.
+KFS1 uses ASCII lines with request IDs and CRC32-protected frames. Paths and
+Baseline data use hex; FAST1 negotiates larger hex/Base64 blocks. See
+[transfer profiles](transfer-speed.md). Hex avoids `+++` in legacy data payloads.
 The firmware sends one response to each request; the client retries a lost or
-corrupted response with the same ID. The firmware replays the previous response
-without advancing its file offset twice. A sequential 128-byte chunk transfer
+corrupted response with the same ID. The firmware replays confirmed responses
+without advancing its file offset twice; FAST1 retains two data replies for its
+bounded batch mode. A sequential legacy 128-byte chunk transfer
 ends with a byte count and whole-file CRC32. This detects accidental corruption;
 it is not authentication or encryption.
 
-Frames are bounded to 768 bytes, absolute UTF-8 SD paths to 192 bytes, directory
+Frames are bounded to 1024 bytes, absolute UTF-8 SD paths to 192 bytes, directory
 listings to 4096 entries, and files to 4 GiB minus one byte. One directory entry
 is requested per exchange. Card contents must stay unchanged while browsing or
 transferring. Each file is held open read-only during its download. Heartbeats
@@ -94,11 +102,11 @@ compatibility, not physical radio reliability; perform the hardware test above.
 
 ## Verified uploads — 2026-10-21
 
-The matching upload feature build adds Upload and Remove partial controls to
+Current main builds include Upload and Remove partial controls in
 this tab. See [upload setup, protocol, recovery and hardware tests](remote-upload.md).
 Existing file names are preserved; uploads publish only after SD read-back verification.
 
 ## Delete and rename — 2026-10-21
 
-Matching `feature/remote-file-management` builds add file-only Delete and Rename
+Current `main` builds include file-only Delete and Rename
 controls. See [setup, limitations and lost-reply recovery](remote-file-management.md).

@@ -1,6 +1,6 @@
 # Verified satellite uploads — 2026-10-21
 
-Use matching GCS and Lab 8 builds from `feature/remote-upload`. This extends the
+Use matching GCS and Lab 8 builds from `main`. This extends the
 working stability build. The project owner confirmed the preceding stability
 build worked on hardware and subsequently confirmed the upload build works.
 The current [file-management build](remote-file-management.md) includes these uploads.
@@ -8,8 +8,8 @@ The current [file-management build](remote-file-management.md) includes these up
 ## Upload a file
 
 1. Extract the matching firmware source artifact. In PlatformIO, upload
-   `esp32thing_plus_115200` for the existing 115200 radios. The USB startup line
-   should contain `KFS1 upload-1`. The default environment remains 9600.
+   `esp32thing_plus_115200_camera_cs27` for the confirmed GPIO27/115200 setup. The USB startup line
+   should contain `KFS1 speed-1`. The default environment remains 9600.
 2. Extract and launch the matching Windows GCS. Keep the working radio pairing,
    UART rate and mode: satellite AP=0; ground AP=1 and GCS XBee API (AP=1) for
    RSSI, or ground AP=0 and GCS Transparent. Legacy AO=2 output is supported.
