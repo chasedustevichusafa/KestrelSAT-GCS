@@ -13,6 +13,7 @@ import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 
 from . import link_tracker as link
+from . import link_replay
 from .link_plot import LinkPlot
 from .widgets import ScrollableFrame
 
@@ -37,6 +38,7 @@ class LinkTrackerTab:
         self.mode = tk.StringVar(value='Last 60 s')
         self.smooth = tk.BooleanVar(value=True)
         self.target = tk.StringVar(value='Combined')
+        self.recheck_import = tk.BooleanVar(value=False)
         self.marker = tk.StringVar()
         self.distance = tk.StringVar()
         self.status = tk.StringVar(value='Tracking is off. Connect in XBee API (AP=1) mode, then Start.')
@@ -61,6 +63,15 @@ class LinkTrackerTab:
         self.stop_button = ttk.Button(controls, text='Stop', command=self.stop, state=tk.DISABLED)
         self.stop_button.pack(side=tk.LEFT, padx=6)
         ttk.Button(controls, text='Show graphs', command=self.show_graphs).pack(side=tk.LEFT)
+        saved = ttk.LabelFrame(body, text='Rebuild saved graphs (no connection needed)', padding=6)
+        saved.pack(fill=tk.X, pady=6)
+        self.open_bundle_button = ttk.Button(saved, text='Open CSV bundle...', command=self.open_bundle)
+        self.open_bundle_button.grid(row=0, column=0, padx=(0,6), sticky=tk.W)
+        self.open_folder_button = ttk.Button(saved, text='Open session folder...', command=self.open_folder)
+        self.open_folder_button.grid(row=0, column=1, sticky=tk.W)
+        self.recheck_button = ttk.Checkbutton(saved, text='On open: recheck RSSI using Expected receive source above',
+                    variable=self.recheck_import)
+        self.recheck_button.grid(row=1, column=0, columnspan=2, sticky=tk.W, pady=(5,0))
         self.combo = ttk.Combobox(body, textvariable=self.selection, state='readonly', width=65)
         self.combo.pack(fill=tk.X, pady=4)
         self.combo.bind('<<ComboboxSelected>>', self._select)
@@ -105,13 +116,17 @@ class LinkTrackerTab:
             self.plot.theme(colors)
 
     def _controls(self):
-        self.start_button.configure(state=tk.DISABLED if self.busy else tk.NORMAL)
+        loading = self.io_worker is not None
+        self.start_button.configure(state=tk.DISABLED if self.busy or loading else tk.NORMAL)
+        for widget in (self.open_bundle_button, self.open_folder_button, self.recheck_button):
+            widget.configure(state=tk.DISABLED if self.busy or loading else tk.NORMAL)
+        self.combo.configure(state='disabled' if loading else 'readonly')
         self.stop_button.configure(state=tk.NORMAL if self.busy else tk.DISABLED)
         for widget, idle in self.inputs:
             widget.configure(state=tk.DISABLED if self.busy else idle)
 
     def start(self):
-        if self.closed or self.busy:
+        if self.closed or self.busy or self.io_worker is not None:
             return
         app, port = self.app, self.app.serial_connection
         if not app.is_connected or app.test_mode or not getattr(port, 'api_mode', False):
@@ -136,11 +151,8 @@ class LinkTrackerTab:
                                     int(self.rate.get()), float(self.timeout.get()), configuration)
         except (ValueError, OSError) as exc:
             self.status.set('Cannot start: '+str(exc)); return
-        self.active = self.recording = record
-        self.history.appendleft(record)
-        self.combo.configure(values=[r.id+' | '+r.name for r in self.history])
-        self.selection.set(record.id+' | '+record.name)
-        self.full_data = None
+        self.active = record
+        self._remember(record)
         self.cancel = cancel = threading.Event()
         self.busy = True
         app._transfer_cancel = cancel
@@ -177,16 +189,65 @@ class LinkTrackerTab:
             self.cancel.set()
             self.status.set('Stopping tracking...')
 
+    def _label(self, record):
+        return getattr(record, 'selection_id', record.id)+' | '+record.name
+
+    def _remember(self, record):
+        self.recording = record
+        self.history.appendleft(record)
+        self.combo.configure(values=[self._label(r) for r in self.history])
+        self.selection.set(self._label(record))
+        self.full_data = None
+
+    def _can_import(self):
+        if self.closed:
+            return False
+        if self.busy or self.io_worker is not None:
+            self.status.set('Stop tracking and wait for the current file operation before opening a saved session.')
+            return False
+        return True
+
+    def open_bundle(self):
+        self._open_saved(False)
+
+    def open_folder(self):
+        self._open_saved(True)
+
+    def _open_saved(self, folder):
+        if not self._can_import():
+            return
+        try:
+            source = link_replay.parse_source(self.source.get()) if self.recheck_import.get() else None
+        except ValueError as exc:
+            self.status.set(str(exc)); return
+        path = (filedialog.askdirectory(parent=self.app.root, title='Open Link Tracker session folder') if folder else
+                filedialog.askopenfilename(parent=self.app.root, title='Open Link Tracker CSV bundle',
+                                          filetypes=[('Link Tracker bundle', '*.zip')]))
+        # Native dialogs pump events. Recheck before changing selected history.
+        if path and self._can_import():
+            self.load_saved(path, source)
+
+    def load_saved(self, path, source_override=None):
+        """Capture plain arguments before starting the existing file worker."""
+        if not self._can_import():
+            return
+        if self._io('import', lambda: link_replay.SavedSession(path, source_override)):
+            self.status.set('Validating saved CSV bundle and rebuilding graphs...')
+
     def _select(self, event=None):
         if self.io_worker is not None and self.io_worker.is_alive():
-            self.status.set('Wait for the current export/load to finish.'); return
-        self.recording = next((r for r in self.history if self.selection.get().startswith(r.id)), None)
+            self.status.set('Wait for the current export/load to finish.')
+            if self.recording is not None: self.selection.set(self._label(self.recording))
+            return
+        self.recording = next((r for r in self.history if self.selection.get() == self._label(r)), None)
         self.full_data = None
         self._view()
 
     def _io(self, kind, work):
         if self.io_worker is not None and self.io_worker.is_alive():
-            self.status.set('Wait for the current export/load to finish.'); return False
+            self.status.set('Wait for the current export/load to finish.')
+            if self.recording is not None: self.selection.set(self._label(self.recording))
+            return False
         # The worker captures only plain recording data and this mailbox, not
         # the Tk tab. It can finish an immutable-file operation after shutdown
         # without retaining Tk variables whose destructor needs Tk's thread.
@@ -199,6 +260,7 @@ class LinkTrackerTab:
             except Exception as exc:
                 completion.append((record, None, str(exc)))
         self.io_worker = threading.Thread(target=run, daemon=True); self.io_worker.start()
+        self._controls()
         return True
 
     def _view(self, event=None):
@@ -208,13 +270,7 @@ class LinkTrackerTab:
             if record.status == 'running':
                 self.status.set('During tracking, graphs use bounded recent history. Stop to load the complete session.')
             elif self.full_data is None:
-                def load():
-                    snap = record.snapshot()
-                    snap['packets'] = link.bounded_rows(record.directory/'packets.csv')
-                    snap['probe_rows'] = link.bounded_rows(record.directory/'probes.csv')
-                    snap['events'] = link.bounded_rows(record.directory/'events.csv')
-                    snap['decimated'] = any(count > link.LIMIT for count in record.row_counts.values())
-                    return snap
+                load = record.graph_snapshot
                 if self._io('full', load):
                     self.status.set('Loading full-session plot envelope from CSV...')
 
@@ -288,17 +344,27 @@ class LinkTrackerTab:
         if self.io_worker is not None and not self.io_worker.is_alive() and self.io_result:
             record, data, error = self.io_result[0]
             self.io_worker = self.io_result = None
+            self._controls()
             if error:
                 self.status.set('File operation failed: '+error)
             elif self.io_kind == 'full' and record is self.recording:
                 self.full_data = data
                 self.status.set('Full-session envelope loaded; raw CSV preserves every recorded row.')
+            elif self.io_kind == 'import':
+                self._remember(data)
+                self.mode.set('Full session')
+                self.full_data = data.graph_snapshot()
+                self.paths.set('Imported from: '+str(data.source_path))
+                self.status.set('Saved graphs rebuilt. '+(' '.join(data.warnings) or 'Original verification flags preserved.'))
+                if self.show_graphs(): self._draw()
             elif self.io_kind == 'export':
                 self.status.set('CSV bundle exported.')
         if self.recording is not None:
             snap = self.recording.snapshot()
             fresh = snap['rssi'] is not None and snap['age'] <= 2
             signal = f'{snap["rssi"]} dBm, age {snap["age"]:.1f} s' if fresh else 'no fresh verified RSSI'
+            if snap.get('imported'):
+                signal = f'last recorded RSSI {snap["rssi"]} dBm' if snap['rssi'] is not None else 'no verified RSSI in saved data'
             success = f'{snap["success_pct"]:.1f}%' if snap['success_pct'] is not None else '--'
             latest = snap['probe_rows'][-1] if snap['probe_rows'] else None
             latency = f'{latest["latency_ms"]:.1f} ms' if latest and latest['latency_ms'] != '' else '--'
@@ -328,3 +394,7 @@ class LinkTrackerTab:
             self.worker.join(timeout=2)
         if self.plot is not None:
             self.plot.close()
+        # Workers retain only plain records/mailboxes. Releasing history here
+        # lets private import caches expire once any in-flight read is finished.
+        self.history.clear()
+        self.recording = self.full_data = self.io_result = None

@@ -98,3 +98,16 @@ The full runner and Windows artifact workflow run this suite.
 Each formatting GUI case starts in a fresh process, and the restart check uses
 a second process. This avoids retaining destroyed Tcl interpreters alongside a
 shared QApplication on Windows; assertions still run once and failures propagate.
+
+## Link Tracker bundle replay — 2026-11-03
+
+`test_link_replay.py` runs 12 core tests and six GUI cases in fresh processes.
+Coverage includes exact ZIP/folder graph reconstruction, frozen historical time,
+original-file re-export, explicit source-0000 rechecking with stale/ambiguous/
+other-source exclusion, optional legacy columns, complete summary counts beyond
+the bounded plot history, interrupted/empty sessions, invalid schemas/archives/
+CSV/numbers/flags/paths/duplicates/symlinks/size limits, and dense-window median
+results against an independent reference. Offline UI cases verify all PNG targets,
+white/black styles, literal checkpoint braces, distinct duplicate-import history,
+error rollback, live-operation exclusion and shutdown during a pending load.
+The full runner and Windows artifact build include the suite.

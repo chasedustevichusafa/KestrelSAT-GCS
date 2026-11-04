@@ -237,19 +237,34 @@ class Recording:
         with self.lock:
             if self.status == 'running':
                 raise RuntimeError('Stop tracking before exporting the complete CSV bundle')
-        path = Path(path)
-        if path.resolve().is_relative_to(self.directory.resolve()):
-            raise ValueError('Export outside the original recording folder to preserve its raw logs')
-        # Preserve an existing export if compression/disk I/O fails midway.
-        with tempfile.NamedTemporaryFile(dir=path.parent, prefix='.link-export-', delete=False) as handle:
-            temporary = Path(handle.name)
-        try:
-            with zipfile.ZipFile(temporary, 'w', zipfile.ZIP_DEFLATED) as archive:
-                for name in ('packets.csv', 'probes.csv', 'events.csv', 'session.json'):
-                    archive.write(self.directory/name, arcname=name)
-            temporary.replace(path)
-        finally:
-            temporary.unlink(missing_ok=True)
+        export_bundle(self.directory, path)
+
+    def graph_snapshot(self):
+        if self.status == 'running':
+            raise RuntimeError('Stop tracking before loading the complete timeline')
+        snap = self.snapshot()
+        for key, kind in (('packets', 'packets'), ('probe_rows', 'probes'), ('events', 'events')):
+            snap[key] = bounded_rows(self.directory/(kind+'.csv'))
+        snap['decimated'] = any(count > LIMIT for count in self.row_counts.values())
+        return snap
+
+
+def export_bundle(directory, path):
+    """Atomic copy of a stopped recording's four raw files, preserving sources."""
+    directory = Path(directory)
+    path = Path(path)
+    if path.resolve().is_relative_to(directory.resolve()):
+        raise ValueError('Export outside the original recording folder to preserve its raw logs')
+    # Preserve an existing export if compression/disk I/O fails midway.
+    with tempfile.NamedTemporaryFile(dir=path.parent, prefix='.link-export-', delete=False) as handle:
+        temporary = Path(handle.name)
+    try:
+        with zipfile.ZipFile(temporary, 'w', zipfile.ZIP_DEFLATED) as archive:
+            for name in ('packets.csv', 'probes.csv', 'events.csv', 'session.json'):
+                archive.write(directory/name, arcname=name)
+        temporary.replace(path)
+    finally:
+        temporary.unlink(missing_ok=True)
 
 
 class Tracker:
