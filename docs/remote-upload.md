@@ -93,10 +93,10 @@ the existing KFS1 frame checksum and request IDs:
 | Command | Purpose / successful response |
 | --- | --- |
 | CAPS | `CAPS\|UPLOAD1\|MANAGE1\|CAMERA1\|CAMDIAG1\|FAST1\|128` capability check |
-| PUT pathHex size crc32 | Create temporary file; `READY|token|size` |
-| WRITE token offset dataHex | Write/sync up to 128 bytes; `ACK|next|size` |
-| VERIFY token offset | Read back up to 1024 bytes; `CHECKED|next|size` |
-| COMMIT token | Verify totals and publish; `STORED|size|crc32` |
+| PUT pathHex size crc32 | Create temporary file; `READY\|token\|size` |
+| WRITE token offset dataHex | Write/sync up to 128 bytes; `ACK\|next\|size` |
+| VERIFY token offset | Read back up to 1024 bytes; `CHECKED\|next\|size` |
+| COMMIT token | Verify totals and publish; `STORED\|size\|crc32` |
 | STATUS token | Active position or retained STORED result |
 | ABORT token | Clean unfinished file; ABORTED result or retained STORED result |
 | CLEAN pathHex | Remove a reserved inactive temporary file; REMOVED |
